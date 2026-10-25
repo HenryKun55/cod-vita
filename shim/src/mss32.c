@@ -1195,16 +1195,118 @@ SHIM(mss32, _AIL_stream_volume_pan_12)
 
 SHIM(mss32, _AIL_set_stream_reverb_levels_12) { stdcall_ret(c, 0, 3); }
 
-/* ---- format conversion (not seen used yet) --------------------------------- */
+/* ---- format conversion -----------------------------------------------------
+ * AILMIXINFO (MSS 6.5): AILSOUNDINFO Info (36 bytes), ADPCMDATA (72 bytes),
+ * U32 src_fract, S32 left_val, S32 right_val. The game converts its sounds to
+ * the output format with these: each source resampled (linear) to dest_rate and
+ * dest_format, several sources summed. */
+#define MIXINFO_SIZE 120u
 
-SHIM(mss32, _AIL_size_processed_digital_audio_16)
+typedef struct SrcPcm {
+    int16_t *pcm;        /* 16-bit frames (owned) */
+    uint32_t frames;
+    int channels;
+    uint32_t rate;
+} SrcPcm;
+
+static int load_src(uint32_t mi, SrcPcm *o)
 {
-    rt_log("AIL_size_processed_digital_audio: not implemented");
-    stdcall_ret(c, 0, 4);
+    uint32_t fmt = RD32(mi), data = RD32(mi + 4u), len = RD32(mi + 8u), rate = RD32(mi + 12u);
+    int bits = (int)RD32(mi + 16u), ch = (int)RD32(mi + 20u);
+    uint32_t block = RD32(mi + 28u);
+    memset(o, 0, sizeof(*o));
+    if (ch < 1 || ch > 2 || !rate || !data)
+        return 0;
+    o->channels = ch;
+    o->rate = rate;
+    if (fmt == WAVE_FORMAT_IMA_ADPCM) {
+        o->pcm = ima_decode(g_mem + data, len, block ? block : 512u * (uint32_t)ch, ch, &o->frames);
+        return o->pcm != NULL;
+    }
+    uint32_t bpf = (uint32_t)(bits / 8 * ch);
+    if (!bpf)
+        return 0;
+    o->frames = len / bpf;
+    o->pcm = malloc((size_t)o->frames * ch * 2u + 2u);
+    if (!o->pcm)
+        return 0;
+    for (uint32_t i = 0; i < o->frames * (uint32_t)ch; i++)
+        o->pcm[i] = bits == 16 ? (int16_t)RD16(data + i * 2u) : (int16_t)((RD8(data + i) - 128) << 8);
+    return 1;
 }
 
+static uint32_t out_frames(const SrcPcm *s, uint32_t dest_rate)
+{
+    return (uint32_t)(((uint64_t)s->frames * dest_rate + s->rate - 1u) / s->rate);
+}
+
+/* AIL_size_processed_digital_audio(dest_rate, dest_format, num_srcs, AILMIXINFO const *src) */
+SHIM(mss32, _AIL_size_processed_digital_audio_16)
+{
+    uint32_t rate = ARG(0), fmt = ARG(1), n = ARG(2), src = ARG(3);
+    uint32_t bpf = ((fmt & DIG_F_16BITS_MASK) ? 2u : 1u) * ((fmt & DIG_F_STEREO_MASK) ? 2u : 1u);
+    uint32_t most = 0;
+    for (uint32_t k = 0; k < n; k++) {
+        uint32_t mi = src + k * MIXINFO_SIZE;
+        uint32_t fmt_s = RD32(mi), len = RD32(mi + 8u), srate = RD32(mi + 12u);
+        int bits = (int)RD32(mi + 16u), ch = (int)RD32(mi + 20u);
+        uint32_t frames;
+        if (fmt_s == WAVE_FORMAT_IMA_ADPCM) {
+            uint32_t block = RD32(mi + 28u) ? RD32(mi + 28u) : 512u * (uint32_t)ch;
+            uint32_t per = block >= 4u * (uint32_t)ch ? (block - 4u * (uint32_t)ch) * 2u / (uint32_t)ch + 1u : 1u;
+            frames = (len + block - 1u) / block * per;
+        } else {
+            frames = bits && ch ? len / (uint32_t)(bits / 8 * ch) : 0u;
+        }
+        uint32_t f = srate ? (uint32_t)(((uint64_t)frames * rate + srate - 1u) / srate) : 0u;
+        if (f > most)
+            most = f;
+    }
+    stdcall_ret(c, most * bpf, 4);
+}
+
+/* AIL_process_digital_audio(dest, dest_size, dest_rate, dest_format, num_srcs, AILMIXINFO *src) */
 SHIM(mss32, _AIL_process_digital_audio_24)
 {
-    rt_log("AIL_process_digital_audio: not implemented");
-    stdcall_ret(c, 0, 6);
+    uint32_t dest = ARG(0), size = ARG(1), rate = ARG(2), fmt = ARG(3), n = ARG(4), src = ARG(5);
+    int dch = (fmt & DIG_F_STEREO_MASK) ? 2 : 1, d16 = (fmt & DIG_F_16BITS_MASK) != 0;
+    uint32_t bpf = (uint32_t)(dch * (d16 ? 2 : 1));
+    uint32_t cap = bpf ? size / bpf : 0u, written = 0;
+    float *acc = calloc((size_t)cap * dch + 1u, sizeof(float));
+    for (uint32_t k = 0; acc && k < n; k++) {
+        SrcPcm s;
+        if (!load_src(src + k * MIXINFO_SIZE, &s))
+            continue;
+        uint32_t of = out_frames(&s, rate);
+        if (of > cap)
+            of = cap;
+        double step = (double)s.rate / rate;
+        for (uint32_t i = 0; i < of; i++) {
+            double p = i * step;
+            uint32_t j = (uint32_t)p;
+            float t = (float)(p - j);
+            uint32_t j1 = j + 1 < s.frames ? j + 1 : j;
+            for (int ch = 0; ch < dch; ch++) {
+                int sc = ch < s.channels ? ch : 0;
+                float a = s.pcm[(size_t)j * s.channels + sc], b = s.pcm[(size_t)j1 * s.channels + sc];
+                float v = a + (b - a) * t;
+                if (dch == 1 && s.channels == 2)
+                    v = 0.5f * (v + s.pcm[(size_t)j * 2 + 1]);
+                acc[(size_t)i * dch + ch] += v;
+            }
+        }
+        if (of > written)
+            written = of;
+        free(s.pcm);
+    }
+    for (uint32_t i = 0; acc && i < written * (uint32_t)dch; i++) {
+        float v = acc[i];
+        int32_t x = (int32_t)(v > 32767.0f ? 32767.0f : v < -32768.0f ? -32768.0f : v);
+        if (d16)
+            WR16(dest + i * 2u, (uint32_t)(uint16_t)(int16_t)x);
+        else
+            WR8(dest + i, (uint32_t)((x >> 8) + 128));
+    }
+    free(acc);
+    stdcall_ret(c, written * bpf, 6);
 }

@@ -58,6 +58,13 @@ static uint32_t quit_code;
 
 void user32_post_message(uint32_t message, uint32_t wparam, uint32_t lparam)
 {
+    /* Mouse messages carry the state of every button in wParam (MK_LBUTTON...):
+     * the game reads the buttons from there, not from the message kind. */
+    if (message >= 0x0200u && message <= 0x020Du) {
+        uint32_t mk = (g_mouse.buttons[0] ? 0x01u : 0u) | (g_mouse.buttons[1] ? 0x02u : 0u) |
+                      (g_mouse.buttons[2] ? 0x10u : 0u);
+        wparam = (wparam & 0xFFFF0000u) | mk;
+    }
     unsigned next = (msg_tail + 1u) % MSGQ;
     if (next == msg_head)
         return;

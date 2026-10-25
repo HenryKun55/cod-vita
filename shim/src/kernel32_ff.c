@@ -2,6 +2,8 @@
  * directories, file time conversions, messages). */
 #include "shim.h"
 
+#include <string.h>
+
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
@@ -182,12 +184,30 @@ SHIM(kernel32, RemoveDirectoryA)
     stdcall_ret(c, rmdir(path) == 0, 1);
 }
 
+/* The parent directories of a file's path (the game moves saves into
+ * save/autosave/ without creating it first). */
+static void make_parents(const char *path)
+{
+    char tmp[1100];
+    snprintf(tmp, sizeof(tmp), "%s", path);
+    for (char *p = tmp + 1; *p; p++)
+        if (*p == '/') {
+            *p = 0;
+            mkdir(tmp, 0755);
+            *p = '/';
+        }
+}
+
 SHIM(kernel32, MoveFileA)
 {
     char a[1100], b[1100];
     win_path_to_host(gstr(ARG(0)), a, sizeof(a));
     win_path_to_host(gstr(ARG(1)), b, sizeof(b));
-    stdcall_ret(c, rename(a, b) == 0, 2);
+    make_parents(b);
+    int ok = rename(a, b) == 0;
+    if (!ok)
+        rt_log("MoveFileA(%s, %s): %s", a, b, strerror(errno));
+    stdcall_ret(c, ok, 2);
 }
 
 SHIM(kernel32, CopyFileA)
@@ -195,6 +215,7 @@ SHIM(kernel32, CopyFileA)
     char a[1100], b[1100];
     win_path_to_host(gstr(ARG(0)), a, sizeof(a));
     win_path_to_host(gstr(ARG(1)), b, sizeof(b));
+    make_parents(b);
     int ok = 0;
     if (!(ARG(2) && access(b, F_OK) == 0)) {
         FILE *in = fopen(a, "rb"), *out = in ? fopen(b, "wb") : NULL;
