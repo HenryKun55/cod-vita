@@ -44,8 +44,11 @@ static inline GLdouble argd(Ctx *c, int slot)
     return d;
 }
 
-/* Per-call trace hook (debugging); nothing in normal builds. */
-#define GL_TRACE(name) ((void)0)
+/* Frame trace (Cmd+P, or "trace" in COD_INPUT): every GL call of one frame is
+ * logged with its first stack arguments. */
+extern int g_gl_tracing;
+void gl_trace_call(Ctx *c, const char *name);
+#define GL_TRACE(name) do { if (__builtin_expect(g_gl_tracing, 0)) gl_trace_call(c, (name)); } while (0)
 
 /* Address the guest gets from GetProcAddress(opengl32) / wglGetProcAddress. */
 uint32_t opengl32_get_proc(const char *name);

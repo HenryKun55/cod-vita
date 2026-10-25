@@ -301,8 +301,45 @@ static void save_shot(void)
     free(px);
 }
 
+int g_gl_tracing;
+extern int g_trace_next_frame;
+
+void gl_trace_call(Ctx *c, const char *name)
+{
+    static uint32_t vptr, cptr, vsize = 3, vstride, cstride;
+    rt_log("gl %s(%08X %08X %08X %08X %08X %08X)", name, ARG(0), ARG(1), ARG(2), ARG(3), ARG(4), ARG(5));
+    if (!strcmp(name, "glVertexPointer")) {
+        vsize = ARG(0);
+        vstride = ARG(2) ? ARG(2) : vsize * 4u;
+        vptr = ARG(3);
+    } else if (!strcmp(name, "glColorPointer")) {
+        cstride = ARG(2) ? ARG(2) : 4u;
+        cptr = ARG(3);
+    } else if (!strcmp(name, "glDrawElements") && vptr) {
+        /* the first vertices drawn (unsigned int indices) */
+        uint32_t n = ARG(1) < 4u ? ARG(1) : 4u, idx = ARG(3);
+        for (uint32_t k = 0; k < n; k++) {
+            uint32_t i = ARG(2) == 0x1405u ? RD32(idx + 4u * k) : ARG(2) == 0x1403u ? RD16(idx + 2u * k) : RD8(idx + k);
+            float x, y, z;
+            uint32_t a = vptr + i * vstride;
+            memcpy(&x, gptr(a), 4);
+            memcpy(&y, gptr(a + 4u), 4);
+            memcpy(&z, gptr(a + 8u), 4);
+            rt_log("    v%u: %.1f %.1f %.1f  rgba %08X", i, x, y, z, cptr ? RD32(cptr + i * cstride) : 0u);
+        }
+    }
+}
+
 static void present(void)
 {
+    if (g_gl_tracing) {
+        g_gl_tracing = 0;
+        g_trace_next_frame = 0;
+        rt_log("gl trace: end of frame");
+    } else if (g_trace_next_frame) {
+        g_gl_tracing = 1;
+        rt_log("gl trace: next frame");
+    }
     if (shot_pending) {
         shot_pending = 0;
         save_shot();

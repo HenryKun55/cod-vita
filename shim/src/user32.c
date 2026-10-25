@@ -3,6 +3,7 @@
 #include "shim.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <strings.h>
 
@@ -16,6 +17,7 @@
 #define HWND_VIRT_BASE 0x00040000u
 #define IS_VIRT(h) ((h) >= HWND_VIRT_BASE && (h) < HWND_VIRT_BASE + 0x10000u)
 static uint32_t virt_count;
+static void show_main(Ctx *c, int show);
 
 #define WM_CREATE 0x0001u
 #define WM_DESTROY 0x0002u
@@ -181,6 +183,8 @@ SHIM(user32, CreateWindowExA)
         stdcall_ret(c, 0, 12);
         return;
     }
+    if (style & 0x10000000u)   /* WS_VISIBLE */
+        show_main(c, 1);
     stdcall_ret(c, HWND_MAIN, 12);
 }
 
@@ -203,6 +207,21 @@ SHIM(user32, DestroyWindow)
 
 /* Messages go out only when the visibility changes, as in Windows: the game's
  * window procedure calls ShowWindow while handling them. */
+/* The game window becomes visible (ShowWindow, or created with WS_VISIBLE). */
+static void show_main(Ctx *c, int show)
+{
+    wnd.visible = show;
+    platform_show_window(show);
+    send_message(c, WM_SHOWWINDOW, (uint32_t)show, 0);
+    if (show && !wnd.activated) {
+        wnd.activated = 1;
+        send_message(c, WM_ACTIVATEAPP, 1, 0);
+        send_message(c, WM_ACTIVATE, 1, 0);
+        send_message(c, WM_SETFOCUS, 0, 0);
+        send_message(c, WM_SIZE, 0, ((uint32_t)wnd.h << 16) | (uint32_t)wnd.w);
+    }
+}
+
 SHIM(user32, ShowWindow)
 {
     if (IS_VIRT(ARG(0))) {
@@ -212,18 +231,8 @@ SHIM(user32, ShowWindow)
     uint32_t cmd = ARG(1);
     int show = cmd != 0;
     int was = wnd.visible;
-    if (show != was) {
-        wnd.visible = show;
-        platform_show_window(show);
-        send_message(c, WM_SHOWWINDOW, (uint32_t)show, 0);
-        if (show && !wnd.activated) {
-            wnd.activated = 1;
-            send_message(c, WM_ACTIVATEAPP, 1, 0);
-            send_message(c, WM_ACTIVATE, 1, 0);
-            send_message(c, WM_SETFOCUS, 0, 0);
-            send_message(c, WM_SIZE, 0, ((uint32_t)wnd.h << 16) | (uint32_t)wnd.w);
-        }
-    }
+    if (show != was)
+        show_main(c, show);
     stdcall_ret(c, (uint32_t)was, 2);
 }
 
@@ -449,6 +458,16 @@ SHIM(user32, SetWindowLongA)
 SHIM(user32, SendMessageA)
 {
     if (IS_VIRT(ARG(0))) {
+        /* The dedicated console's text (EM_REPLACESEL into its edit control) goes to the log. */
+        if (ARG(1) == 0x00C2u && ARG(3)) {
+            char line[1024];
+            snprintf(line, sizeof(line), "%s", gstr(ARG(3)));
+            for (char *p = line; *p; p++)
+                if (*p == '\r' || *p == '\n')
+                    *p = ' ';
+            if (line[0])
+                rt_log("[con] %s", line);
+        }
         stdcall_ret(c, 0, 4);
         return;
     }
@@ -491,19 +510,47 @@ SHIM(user32, MessageBoxW)
 
 /* ---- cursor, window geometry ---------------------------------------------------- */
 
+/* The game reads the mouse as Quake 3 does on Windows: GetCursorPos, the offset
+ * from the window centre, SetCursorPos back to the centre. The cursor is virtual:
+ * where SetCursorPos put it plus the relative motion since. */
+static int32_t cursor_x = 320, cursor_y = 240;
+
 SHIM(user32, GetCursorPos)
 {
-    WR32(ARG(0), (uint32_t)g_mouse.x);
-    WR32(ARG(0) + 4u, (uint32_t)g_mouse.y);
+    if ((g_mouse.dx || g_mouse.dy) && getenv("COD_MOUSE_DEBUG"))
+        rt_log("GetCursorPos: %d,%d + %d,%d", cursor_x, cursor_y, g_mouse.dx, g_mouse.dy);
+    cursor_x += g_mouse.dx;
+    cursor_y += g_mouse.dy;
+    g_mouse.dx = g_mouse.dy = 0;
+    WR32(ARG(0), (uint32_t)cursor_x);
+    WR32(ARG(0) + 4u, (uint32_t)cursor_y);
     stdcall_ret(c, 1, 1);
 }
 
-SHIM(user32, SetCursorPos) { stdcall_ret(c, 1, 2); }
+SHIM(user32, SetCursorPos)
+{
+    static int n;
+    if (getenv("COD_MOUSE_DEBUG") && n++ < 5)
+        rt_log("SetCursorPos(%d, %d)", ARG(0), ARG(1));
+    cursor_x = (int32_t)ARG(0);
+    cursor_y = (int32_t)ARG(1);
+    stdcall_ret(c, 1, 2);
+}
 SHIM(user32, ScreenToClient) { stdcall_ret(c, 1, 2); }
 SHIM(user32, GetCursor) { stdcall_ret(c, HCURSOR_FAKE, 0); }
 SHIM(user32, SetCursor) { stdcall_ret(c, HCURSOR_FAKE, 1); }
-SHIM(user32, SetCapture) { stdcall_ret(c, 0, 1); }
-SHIM(user32, ReleaseCapture) { stdcall_ret(c, 1, 0); }
+/* The game captures the mouse while it reads it (in the game and the menus). */
+SHIM(user32, SetCapture)
+{
+    platform_capture_mouse(1);
+    stdcall_ret(c, 0, 1);
+}
+
+SHIM(user32, ReleaseCapture)
+{
+    platform_capture_mouse(0);
+    stdcall_ret(c, 1, 0);
+}
 SHIM(user32, ClipCursor) { stdcall_ret(c, 1, 1); }
 SHIM(user32, GetDesktopWindow) { stdcall_ret(c, 0x00010001u, 0); }
 SHIM(user32, GetParent) { stdcall_ret(c, 0, 1); }

@@ -226,7 +226,7 @@ void platform_set_video_mode(int w, int h)
         gl = SDL_GL_CreateContext(window);
         if (!gl)
             rt_fatal(NULL, "SDL_GL_CreateContext: %s", SDL_GetError());
-        const char *vs = getenv("FF_VSYNC");
+        const char *vs = getenv("COD_VSYNC");
         SDL_GL_SetSwapInterval(vs && vs[0] == '0' ? 0 : 1);
     }
     platform_show_window(1);
@@ -310,10 +310,11 @@ static void quit_watchdog_start(void)
     }
 }
 
-/* Mouse capture: the game acquires the mouse through DirectInput for the whole
- * session (its menus have their own cursor too). On the desktop the player
- * decides: a click in the window captures it (relative mode: unlimited turning),
- * Cmd or leaving the window releases it. FF_GRAB=1 captures from the start.
+/* Mouse capture: the game captures the mouse (SetCapture) while it reads it, in
+ * the game and in its menus, which draw their own cursor. It is captured at once
+ * while the window has focus (relative mode: unlimited turning); Cmd releases it
+ * and a click in the window captures it again (that click is passed on too).
+ * COD_GRAB=0 leaves it to that click.
  * Re-applied whenever the window gets focus, because macOS ignores relative
  * mode for an unfocused window. */
 static int mouse_capture_wanted, user_grab = -1;
@@ -323,8 +324,8 @@ static void apply_mouse_capture(void)
     if (!window)
         return;
     if (user_grab < 0) {
-        const char *g = getenv("FF_GRAB");
-        user_grab = g && g[0] == '1';
+        const char *g = getenv("COD_GRAB");
+        user_grab = !(g && g[0] == '0');
     }
     int on = mouse_capture_wanted && user_grab && (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS);
     SDL_SetWindowGrab(window, on ? SDL_TRUE : SDL_FALSE);
@@ -423,9 +424,8 @@ static void handle_event(const SDL_Event *e)
     case SDL_MOUSEBUTTONUP: {
         int down = e->type == SDL_MOUSEBUTTONDOWN;
         if (down && mouse_capture_wanted && user_grab <= 0) {
-            user_grab = 1;             /* a click captures the mouse (and is not passed on) */
+            user_grab = 1;             /* a click captures the mouse again */
             apply_mouse_capture();
-            break;
         }
         int b = e->button.button == SDL_BUTTON_LEFT ? 0 : e->button.button == SDL_BUTTON_RIGHT ? 1 :
                 e->button.button == SDL_BUTTON_MIDDLE ? 2 : 3;
@@ -438,9 +438,16 @@ static void handle_event(const SDL_Event *e)
     }
     case SDL_MOUSEWHEEL:
         g_mouse.dz += e->wheel.y * 120;
+        if (e->wheel.y)   /* WM_MOUSEWHEEL: the delta in the high word of wParam */
+            user32_post_message(0x020A, (uint32_t)(e->wheel.y * 120) << 16,
+                                ((uint32_t)g_mouse.y << 16) | ((uint32_t)g_mouse.x & 0xFFFFu));
         break;
     case SDL_WINDOWEVENT:
         if (e->window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
+            if (user_grab == 0) {
+                const char *g = getenv("COD_GRAB");
+                user_grab = !(g && g[0] == '0');
+            }
             apply_mouse_capture();
             user32_post_message(0x001C, 1, 0);   /* WM_ACTIVATEAPP */
             user32_post_message(0x0006, 1, 0);   /* WM_ACTIVATE */

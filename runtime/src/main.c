@@ -256,6 +256,7 @@ static void log_call(uint32_t i)
 /* Diagnostic entry probes (FF_PROBES at configure time): log the call. */
 void rt_probe(Ctx *c, uint32_t func)
 {
+    if (getenv("COD_PEEK")) { uint32_t a = (uint32_t)strtoul(getenv("COD_PEEK"), NULL, 16); rt_log("peek %08X = %08X %08X", a, RD32(a), RD32(a + 4u)); }
     rt_log("probe %08X: ret=%08X ecx=%08X args %08X %08X %08X", func, RD32(c->r[4]), c->r[1],
            RD32(c->r[4] + 4u), RD32(c->r[4] + 8u), RD32(c->r[4] + 12u));
 }

@@ -56,7 +56,7 @@ void platform_key(uint8_t dik, int down)
     }
 }
 
-/* FF_INPUT="ms:action,ms:action,...": scripted input for automated testing.
+/* COD_INPUT="ms:action,ms:action,...": scripted input for automated testing.
  * Actions: a DIK code in hex (tap), "mx+N"/"my+N" relative mouse motion, "lmb" click,
  * "pad+N"/"pad-N" press/release pad control N (hex, PadControl in pad_input.h) the
  * way the Vita's pad does (shim/src/pad_input.c), "key+K"/"key-K" hold/release DIK
@@ -72,7 +72,7 @@ void platform_scripted_input(void)
     static Uint32 t0;
     if (!init) {
         init = 1;
-        script = getenv("FF_INPUT");
+        script = getenv("COD_INPUT");
 #if defined(__vita__)
         /* No environment on the Vita: read the script from a file. */
         static char buf[4096];
@@ -99,7 +99,7 @@ void platform_scripted_input(void)
     static Uint32 dbg;
     static int input_debug = -1;
     if (input_debug < 0)
-        input_debug = getenv("FF_INPUT_DEBUG") != NULL;
+        input_debug = getenv("COD_INPUT_DEBUG") != NULL;
     if (input_debug && now / 2000u != dbg) {
         dbg = now / 2000u;
         rt_log("[input-debug] now %u rel %u/%d at %u next '%.12s'", now, release_dik, release_lmb, release_at,
