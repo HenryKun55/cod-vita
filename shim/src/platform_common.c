@@ -37,23 +37,20 @@ int platform_pop_key_event(KeyEvent *out)
     return 1;
 }
 
-/* Press or release a key the way the real keyboard does: DirectInput state and
- * buffer, plus the Win32 key messages the menus read (menu keys only). */
+/* Press or release a key the way the real keyboard does: the Win32 key messages
+ * (the game reads every key from WM_KEYDOWN / WM_KEYUP, by the scan code in lParam;
+ * DIK codes are scan codes, 0x80 the extended-key bit) and WM_CHAR for Enter and
+ * Esc, which the menus' text fields read. */
 void platform_key(uint8_t dik, int down)
 {
     g_key_state[dik] = down ? 0x80 : 0;
     platform_push_key(dik, down);
-    static const struct { uint8_t dik; uint8_t vk; } vk[] = {
-        { 0x01, 0x1B }, { 0x1C, 0x0D }, { 0xC8, 0x26 }, { 0xD0, 0x28 }, { 0xCB, 0x25 }, { 0xCD, 0x27 },
-    };
-    for (unsigned i = 0; i < sizeof(vk) / sizeof(vk[0]); i++) {
-        if (vk[i].dik != dik)
-            continue;
-        uint32_t lparam = 1u | ((uint32_t)(dik & 0x7F) << 16) | (down ? 0u : 0xC0000000u);
-        user32_post_message(down ? 0x0100u : 0x0101u, vk[i].vk, lparam);
-        if (down && (vk[i].vk == 0x0D || vk[i].vk == 0x1B))
-            user32_post_message(0x0102, vk[i].vk, lparam);   /* WM_CHAR */
-    }
+    uint32_t lparam = 1u | ((uint32_t)(dik & 0x7F) << 16) | ((dik & 0x80) ? 0x01000000u : 0u) |
+                      (down ? 0u : 0xC0000000u);
+    uint32_t vk = dik == 0x01 ? 0x1Bu : dik == 0x1C ? 0x0Du : 0u;
+    user32_post_message(down ? 0x0100u : 0x0101u, vk, lparam);
+    if (down && vk)
+        user32_post_message(0x0102, vk, lparam);   /* WM_CHAR */
 }
 
 /* COD_INPUT="ms:action,ms:action,...": scripted input for automated testing.
@@ -76,7 +73,7 @@ void platform_scripted_input(void)
 #if defined(__vita__)
         /* No environment on the Vita: read the script from a file. */
         static char buf[4096];
-        FILE *f = fopen("ux0:data/ff/input.txt", "r");
+        FILE *f = fopen("ux0:data/cod1/input.txt", "r");
         if (f) {
             size_t n = fread(buf, 1, sizeof(buf) - 1, f);
             buf[n] = 0;

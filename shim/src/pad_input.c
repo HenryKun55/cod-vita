@@ -1,19 +1,18 @@
 /* Pad controls (see pad_input.h): every control presses what the game's default
- * PC binding of its action is (the table at 0x751430 in Freedom.Exe), a key, a
- * mouse button or a mouse wheel step:
+ * PC binding of its action is (main/default.cfg), a key, a mouse button or a
+ * mouse wheel step:
  *
- *   left stick  move (W A S D)           right stick  aim / look (mouse)
- *   R  fire (left button)                L  precision aim (right button)
- *   X  jump (Space), Enter in the menus  O  crouch (Left Ctrl)
- *   [] use (E)                           /\ close combat (Q)
- *   left / up / right  squad: form up (1), attack (2), defend (3)
- *   down  inventory wheel (middle button)
- *   SELECT  map (M)                      START  menu (Esc)
- *   rear touch  upper half previous weapon, lower half next (mouse wheel)
+ *   left stick  move (W A S D)           right stick  look / aim (mouse)
+ *   R  fire (left button)                L  aim down the sights (right button)
+ *   X  stand up / jump (Space)           O  crouch (C)
+ *   [] reload (R)                        /\ use (F)
+ *   up  grenade (4)                      down  prone (Ctrl)
+ *   left / right  lean (Q / E)
+ *   SELECT  objectives (Tab)             START  menu (Esc)
+ *   rear touch  upper half next weapon (mouse wheel), lower half melee (Shift)
  *
- * In the menus (the game's keyboard navigation): D-pad and left stick the arrow
- * keys, X Enter (select), O and START Esc (back), R the left mouse button (the
- * right stick moves the cursor). */
+ * In the menus: D-pad and left stick the arrow keys, X Enter, O and START Esc,
+ * R the left mouse button (the right stick and the front panel move the cursor). */
 #include "pad_input.h"
 #include "platform.h"
 #include "runtime.h"
@@ -30,18 +29,20 @@ typedef struct Output {
 #define MOUSE(b) { OUT_MOUSE, (b), OUT_NONE, 0 }
 
 #define DIK_ESCAPE 0x01
-#define DIK_1 0x02
-#define DIK_2 0x03
-#define DIK_3 0x04
+#define DIK_4 0x05
+#define DIK_TAB 0x0F
 #define DIK_Q 0x10
 #define DIK_W 0x11
 #define DIK_E 0x12
+#define DIK_R 0x13
 #define DIK_RETURN 0x1C
 #define DIK_LCONTROL 0x1D
 #define DIK_A 0x1E
 #define DIK_S 0x1F
 #define DIK_D 0x20
-#define DIK_M 0x32
+#define DIK_F 0x21
+#define DIK_LSHIFT 0x2A
+#define DIK_C 0x2E
 #define DIK_SPACE 0x39
 #define DIK_UP 0xC8
 #define DIK_LEFT 0xCB
@@ -49,24 +50,24 @@ typedef struct Output {
 #define DIK_DOWN 0xD0
 
 static const Output control_out[PAD_CONTROL_COUNT] = {
-    [PAD_CROSS] = { OUT_KEY, DIK_SPACE, OUT_KEY, DIK_RETURN },
-    [PAD_CIRCLE] = KEY(DIK_LCONTROL),
-    [PAD_SQUARE] = KEY(DIK_E),
-    [PAD_TRIANGLE] = KEY(DIK_Q),
+    [PAD_CROSS] = KEY(DIK_SPACE),
+    [PAD_CIRCLE] = KEY(DIK_C),
+    [PAD_SQUARE] = KEY(DIK_R),
+    [PAD_TRIANGLE] = KEY(DIK_F),
     [PAD_L] = MOUSE(1),
     [PAD_R] = MOUSE(0),
-    [PAD_SELECT] = KEY(DIK_M),
+    [PAD_SELECT] = KEY(DIK_TAB),
     [PAD_START] = KEY(DIK_ESCAPE),
-    [PAD_DPAD_UP] = KEY(DIK_2),
-    [PAD_DPAD_DOWN] = MOUSE(2),
-    [PAD_DPAD_LEFT] = KEY(DIK_1),
-    [PAD_DPAD_RIGHT] = KEY(DIK_3),
+    [PAD_DPAD_UP] = KEY(DIK_4),
+    [PAD_DPAD_DOWN] = KEY(DIK_LCONTROL),
+    [PAD_DPAD_LEFT] = KEY(DIK_Q),
+    [PAD_DPAD_RIGHT] = KEY(DIK_E),
     [PAD_LSTICK_UP] = KEY(DIK_W),
     [PAD_LSTICK_DOWN] = KEY(DIK_S),
     [PAD_LSTICK_LEFT] = KEY(DIK_A),
     [PAD_LSTICK_RIGHT] = KEY(DIK_D),
-    [PAD_REAR_UP] = { OUT_WHEEL, 1, OUT_NONE, 0 },
-    [PAD_REAR_DOWN] = { OUT_WHEEL, 2, OUT_NONE, 0 },
+    [PAD_REAR_UP] = { OUT_WHEEL, 2, OUT_NONE, 0 },
+    [PAD_REAR_DOWN] = KEY(DIK_LSHIFT),
 };
 
 static const Output menu_out[PAD_CONTROL_COUNT] = {
@@ -134,13 +135,13 @@ static void output(uint8_t kind, uint8_t code, int down)
     }
 }
 
-/* The game's menu mode (main menu, pause menu and their screens: 1, 0 in play),
- * the flag its cursor functions (0x685F90) test. */
-#define GAME_MENU_MODE 0x7A3008u
+/* cls.keyCatchers of CoDSP.exe: who takes the keys (console, UI, message mode);
+ * 0 while the game is played. */
+#define COD_KEY_CATCHERS 0x01439264u
 
 int pad_in_gameplay(void)
 {
-    return RD32(GAME_MENU_MODE) == 0u;
+    return RD32(COD_KEY_CATCHERS) == 0u;
 }
 
 int pad_capturing_key(void)

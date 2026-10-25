@@ -1,6 +1,6 @@
 /* Host platform layer (SDL2): window, GL context, input state, audio device. */
-#ifndef FF_PLATFORM_H
-#define FF_PLATFORM_H
+#ifndef COD_PLATFORM_H
+#define COD_PLATFORM_H
 
 #include <stdint.h>
 
@@ -25,17 +25,19 @@ void platform_gl_release(void);
 /* Called by the game thread while it waits for the GL thread (macOS: runs work
  * the GL thread queued on the main thread). */
 void platform_service_main(void);
-/* Stops the render thread (drains its queue); safe to call when it is not running. */
+/* Finishes pending GL work before exiting (nothing to wait for today). */
 void render_shutdown(void);
+/* Host address of a GL function (core or extension), NULL when the driver has none. */
+void *platform_gl_proc(const char *name);
+/* Vsync on (1) or off (0). */
+void platform_set_swap_interval(int on);
 
 /* Pump host events: posts Win32 messages and updates the input state below. */
 void platform_pump(void);
-/* Renderer: step to the next live diagnostic mode, or set one. */
-void render_diag_cycle(void);
+/* Renderer diagnostics (none yet). */
 void render_diag_set(int mode);
-/* Renderer: screenshot of the next presented frame under `name` (QA scripts). */
+/* Screenshot of the next presented frame under `name` (QA scripts). */
 void render_shot_request(const char *name);
-int render_overlay_enabled(void);
 /* Block until at least one event is available, then pump. */
 void platform_wait(void);
 void platform_show_cursor(int show);

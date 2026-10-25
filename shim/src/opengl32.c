@@ -8,7 +8,6 @@
 
 #include "platform.h"
 
-#include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <strings.h>
@@ -16,17 +15,6 @@
 void user32_window_size(int *w, int *h);
 
 /* ---- entry points ------------------------------------------------------- */
-
-static int gl_ready;
-
-void *platform_gl_proc(const char *name)
-{
-    if (!gl_ready) {
-        SDL_GL_LoadLibrary(NULL);
-        gl_ready = 1;
-    }
-    return SDL_GL_GetProcAddress(name);
-}
 
 /* ---- hand-written gl* --------------------------------------------------- */
 
@@ -151,11 +139,11 @@ static void wgl_swap_buffers(Ctx *c)
 static void wgl_swap_interval(Ctx *c)
 {
     const char *vs = getenv("COD_VSYNC");
-    SDL_GL_SetSwapInterval(vs && vs[0] == '0' ? 0 : 1);
+    platform_set_swap_interval(!(vs && vs[0] == '0'));
     stdcall_ret(c, 1, 1);
 }
 
-static void wgl_get_swap_interval(Ctx *c) { stdcall_ret(c, (uint32_t)SDL_GL_GetSwapInterval(), 0); }
+static void wgl_get_swap_interval(Ctx *c) { stdcall_ret(c, 1, 0); }
 
 static void wgl_get_extensions_string(Ctx *c)
 {
@@ -230,6 +218,8 @@ static const struct {
 };
 static const unsigned wgl_entry_count = sizeof(wgl_entries) / sizeof(wgl_entries[0]);
 
+static uint32_t gl_missing(void) { return 0; }
+
 uint32_t opengl32_get_proc(const char *name)
 {
     for (unsigned i = 0; i < wgl_entry_count; i++)
@@ -247,8 +237,14 @@ uint32_t opengl32_get_proc(const char *name)
                 snprintf(core, sizeof(core), "%.*s", (int)(n - 3), name);
                 p = platform_gl_proc(core);
             }
-            if (!p)
-                return 0;
+            if (!p) {
+                /* The game looks up the whole GL 1.1 set and calls some functions
+                 * without checking (vitaGL lacks a few, e.g. glLightModeli): they do
+                 * nothing. Calling a function without parameters with arguments is
+                 * harmless in the host ABIs (the caller owns them). */
+                rt_log("GL: %s not in the driver: does nothing", name);
+                p = (void *)gl_missing;
+            }
             *e->host = p;
         }
         return thunk_register(e->fn, e->name);
@@ -271,6 +267,19 @@ void render_shot_request(const char *name)
 void render_diag_set(int mode) { (void)mode; }
 void render_shutdown(void) {}
 
+#if defined(__vita__)
+/* The Vita build is shot from the Vita3K window by tools/qa_vita3k.sh, which
+ * watches for this file. */
+static void save_shot(void)
+{
+    FILE *f = fopen("ux0:data/cod1/shot_now.txt", "w");
+    if (f) {
+        fputs(shot_name, f);
+        fclose(f);
+    }
+    rt_log("screenshot %s requested", shot_name);
+}
+#else
 /* The back buffer as a 24-bit BMP (bottom-up rows, as GL reads them). */
 static void save_shot(void)
 {
@@ -303,6 +312,7 @@ static void save_shot(void)
     }
     free(px);
 }
+#endif
 
 int g_gl_tracing;
 extern int g_trace_next_frame;

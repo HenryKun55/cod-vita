@@ -11,7 +11,7 @@
  * stacks, the shader compiler, the renderer's buffers); textures live in vitaGL's
  * pools. With the extended memory mode (ATTRIBUTE2=12 in param.sfo); the rest of
  * it is vitaGL's. */
-int _newlib_heap_size_user = 272 * 1024 * 1024;
+int _newlib_heap_size_user = 256 * 1024 * 1024;
 #else
 #include <sys/mman.h>
 #endif
@@ -21,13 +21,15 @@ uint32_t g_guest_mem_size;
 void mem_init(void)
 {
 #if defined(__vita__)
-    g_guest_mem_size = 0x0A000000u;   /* 160 MiB: image + 128 MiB guest heap */
+    g_guest_mem_size = 0x0C000000u;   /* 192 MiB: modules, stack, 144 MiB guest heap (hunk inside) */
     g_mem = memalign(4096, g_guest_mem_size);
     if (!g_mem) {
         fprintf(stderr, "cannot allocate guest memory\n");
         exit(1);
     }
-    memset(g_mem, 0, GUEST_HEAP_BASE);
+    /* All of it: fresh Windows memory (VirtualAlloc, a new process's heap) reads as
+     * zeros and the game relies on it, as on the desktop (mmap). */
+    memset(g_mem, 0, g_guest_mem_size);
 #else
     g_guest_mem_size = 0x40000000u;   /* 1 GiB, committed lazily by the OS */
     void *p = mmap(NULL, 0x100000000ull, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);

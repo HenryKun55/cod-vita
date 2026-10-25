@@ -5,7 +5,6 @@
 #include "bench.h"
 #include "pad_input.h"
 #include "runtime.h"
-#include "vita_bootui.h"
 
 #include <SDL.h>
 #include <psp2/ctrl.h>
@@ -58,7 +57,7 @@ static int boot_picture_decode(uint8_t *fb)
 
 static void boot_picture_show(void)
 {
-    SceUID block = sceKernelAllocMemBlock("ff_boot_fb", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, BOOT_FB_SIZE, NULL);
+    SceUID block = sceKernelAllocMemBlock("cod_boot_fb", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, BOOT_FB_SIZE, NULL);
     void *base = NULL;
     if (block < 0 || sceKernelGetMemBlockBase(block, &base) < 0)
         return;
@@ -86,14 +85,13 @@ static void boot_picture_show(void)
 
 void platform_init(void)
 {
-    scePowerSetArmClockFrequency(444);
+    /* 333 MHz: the console's standard clock (no overclock). */
+    scePowerSetArmClockFrequency(333);
     scePowerSetBusClockFrequency(222);
     scePowerSetGpuClockFrequency(222);
     scePowerSetGpuXbarClockFrequency(166);
     sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG_WIDE);
     boot_picture_show();
-    /* The version and the update check over the boot picture (vita_bootui.c). */
-    vita_bootui_run(boot_fb_base);
     if (SDL_Init(SDL_INIT_AUDIO | SDL_INIT_TIMER) != 0)
         rt_fatal(NULL, "SDL_Init: %s", SDL_GetError());
 }
@@ -125,7 +123,7 @@ static int exit_watchdog(SceSize args, void *argp)
 void platform_shutdown(void)
 {
     rt_log_flush();
-    SceUID w = sceKernelCreateThread("ff_exit_watchdog", exit_watchdog, 0x10000100, 0x4000, 0, 0, NULL);
+    SceUID w = sceKernelCreateThread("cod_exit_watchdog", exit_watchdog, 0x10000100, 0x4000, 0, 0, NULL);
     if (w >= 0)
         sceKernelStartThread(w, 0, NULL);
     render_shutdown();
@@ -158,6 +156,16 @@ void platform_gl_init(void)
 }
 
 void platform_gl_release(void) {}
+
+void *platform_gl_proc(const char *name)
+{
+    return vglGetProcAddress(name);
+}
+
+void platform_set_swap_interval(int on)
+{
+    vglWaitVblankStart(on ? GL_TRUE : GL_FALSE);
+}
 void platform_service_main(void) {}
 
 void platform_get_video_mode(int *w, int *h)
@@ -258,7 +266,7 @@ static float stick_sensitivity = 1.0f;   /* ff.cfg stick_sensitivity= */
 
 static void touch_init(void)
 {
-    FILE *f = fopen("ux0:data/ff/ff.cfg", "r");
+    FILE *f = fopen("ux0:data/cod1/cod1.cfg", "r");
     if (f) {
         char line[128];
         while (fgets(line, sizeof(line), f)) {
@@ -423,14 +431,6 @@ void platform_pump(void)
         if (down != ((prev_buttons & b) != 0))
             pad_control(button_map[i].control, down);
     }
-    /* Debug combos, only with the performance overlay on (overlay=1 in ff.cfg). */
-    const uint32_t diag = SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER | SCE_CTRL_SELECT;
-    const int debug = render_overlay_enabled();
-    if (debug && (pad.buttons & diag) == diag && (prev_buttons & diag) != diag)
-        render_diag_cycle();
-    const uint32_t trace = SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER | SCE_CTRL_START;
-    if (debug && (pad.buttons & trace) == trace && (prev_buttons & trace) != trace && !g_trace_next_frame)
-        g_trace_next_frame = 1;   /* log the next frame's draws and save its image */
     prev_buttons = pad.buttons;
 
     /* Left stick: four controls, one per direction. */

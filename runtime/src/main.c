@@ -254,23 +254,80 @@ static void log_call(uint32_t i)
 }
 
 /* Diagnostic entry probes (FF_PROBES at configure time): log the call. */
+/* COD_SELFTEST: at the first call of the file name hash (CoDSP.exe 0x421980,
+ * eax = name, [esp+4] = table size), hash a few names and log the results
+ * (comparing hosts). */
+static void selftest_hash(Ctx *c)
+{
+    static int done;
+    if (done || !getenv("COD_SELFTEST"))
+        return;
+    done = 1;
+    static const char *const names[] = { "ui\\menudef.h", "ui/menudef.h", "textures/belgium/walls/decal@clifface_trans2.dds",
+                                         "sound/voiceovers/stalingrad/commissar1_line_46a.wav" };
+    uint32_t saved[8];
+    memcpy(saved, c->r, sizeof(saved));
+    uint32_t str = scratch_alloc(64, 4);
+    for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        memcpy(gptr(str), names[i], strlen(names[i]) + 1);
+        uint32_t esp = saved[4] - 256u;
+        esp -= 4u;
+        WR32(esp, 2048u);
+        esp -= 4u;
+        WR32(esp, GUEST_RETURN_MAGIC);
+        c->r[4] = esp;
+        c->r[0] = str;
+        rt_dispatch(c, 0x00421990u - 0x10u);
+        rt_log("selftest hash(\"%s\", 2048) = %u", names[i], c->r[0]);
+    }
+    memcpy(c->r, saved, sizeof(saved));
+}
+
+/* Printable guest string at a (or "?"), for COD_PROBE_STRS. */
+static const char *probe_str(uint32_t a)
+{
+    if (a < GUEST_NULL_GUARD || a >= g_guest_mem_size - 64u)
+        return "?";
+    return (const char *)g_mem + a;
+}
+
 void rt_probe(Ctx *c, uint32_t func)
 {
+    /* COD_PROBE_STRS: the strings eax and edx point to (register arguments). */
+    if (getenv("COD_PROBE_STRS"))
+        rt_log("probe %08X: eax \"%.80s\" edx \"%.80s\"", func, probe_str(c->r[0]), probe_str(c->r[2]));
+    if (func == 0x004218D0u && getenv("COD_PROBE_STRS"))
+        rt_log("pak %s: hash size %u, files %u", probe_str(c->r[2]), RD32(c->r[2] + 0x314u), RD32(c->r[2] + 0x30Cu));
+    if (func == 0x00421980u) {
+        static int in;
+        if (!in) {
+            in = 1;
+            selftest_hash(c);
+            in = 0;
+        }
+    }
     /* COD_PEEK="addr[:words],...": guest memory logged at every probe (diagnostics). */
     if (getenv("COD_PEEK")) {
         char line[1024];
         size_t n = 0;
         for (const char *p = getenv("COD_PEEK"); *p && n < sizeof(line) - 64;) {
             char *end;
-            uint32_t a = (uint32_t)strtoul(p, &end, 16), w = 2;
+            /* "*A+O": the dword at guest address A, plus O (one level of pointer). */
+            int deref = *p == '*';
+            uint32_t a = (uint32_t)strtoul(p + deref, &end, 16), w = 2;
+            if (deref) {
+                a = RD32(a);
+                if (*end == '+')
+                    a += (uint32_t)strtoul(end + 1, &end, 16);
+            }
             if (*end == ':')
                 w = (uint32_t)strtoul(end + 1, &end, 10);
             n += (size_t)snprintf(line + n, sizeof(line) - n, " %08X:", a);
             for (uint32_t k = 0; k < w && n < sizeof(line) - 16; k++)
                 n += (size_t)snprintf(line + n, sizeof(line) - n, " %08X", RD32(a + 4u * k));
-            p = *end == ',' ? end + 1 : end;
-            if (end == p && *p != ',')
+            if (*end != ',')
                 break;
+            p = end + 1;
         }
         rt_log("peek%s", line);
     }
@@ -278,8 +335,32 @@ void rt_probe(Ctx *c, uint32_t func)
            RD32(c->r[4] + 4u), RD32(c->r[4] + 8u), RD32(c->r[4] + 12u));
 }
 
+#if defined(__vita__)
+/* No environment on the Vita: ux0:data/cod1/env.txt holds NAME=value lines
+ * (the diagnostics read environment variables). */
+static void load_env_file(void)
+{
+    FILE *f = fopen("ux0:data/cod1/env.txt", "r");
+    if (!f)
+        return;
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        char *eq = strchr(line, '=');
+        if (eq && eq != line) {
+            *eq = 0;
+            setenv(line, eq + 1, 1);
+        }
+    }
+    fclose(f);
+}
+#endif
+
 int main(int argc, char **argv)
 {
+#if defined(__vita__)
+    load_env_file();
+#endif
     const char *dir = getenv("COD_DIR");
     if (argc > 1)
         dir = argv[1];

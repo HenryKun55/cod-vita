@@ -116,20 +116,20 @@ static void gl_glBlendFunc(Ctx *c)
     stdcall_ret(c, c->r[0], 2);
 }
 
-typedef void (*pfn_glBufferDataARB)(GLenum, GLsizeiptrARB, void *, GLenum);
+typedef void (*pfn_glBufferDataARB)(GLenum, GLsizeiptr, void *, GLenum);
 static pfn_glBufferDataARB p_glBufferDataARB;
 static void gl_glBufferDataARB(Ctx *c)
 {
-    p_glBufferDataARB((GLenum)ARG(0), (GLsizeiptrARB)ARG(1), gptr(ARG(2)), (GLenum)ARG(3));
+    p_glBufferDataARB((GLenum)ARG(0), (GLsizeiptr)ARG(1), gptr(ARG(2)), (GLenum)ARG(3));
     GL_TRACE("glBufferDataARB");
     stdcall_ret(c, c->r[0], 4);
 }
 
-typedef void (*pfn_glBufferSubDataARB)(GLenum, GLintptrARB, GLsizeiptrARB, void *);
+typedef void (*pfn_glBufferSubDataARB)(GLenum, GLintptr, GLsizeiptr, void *);
 static pfn_glBufferSubDataARB p_glBufferSubDataARB;
 static void gl_glBufferSubDataARB(Ctx *c)
 {
-    p_glBufferSubDataARB((GLenum)ARG(0), (GLintptrARB)ARG(1), (GLsizeiptrARB)ARG(2), gptr(ARG(3)));
+    p_glBufferSubDataARB((GLenum)ARG(0), (GLintptr)ARG(1), (GLsizeiptr)ARG(2), gptr(ARG(3)));
     GL_TRACE("glBufferSubDataARB");
     stdcall_ret(c, c->r[0], 4);
 }
@@ -1250,11 +1250,11 @@ static void gl_glGetBufferParameterivARB(Ctx *c)
     stdcall_ret(c, c->r[0], 3);
 }
 
-typedef void (*pfn_glGetBufferSubDataARB)(GLenum, GLintptrARB, GLsizeiptrARB, void *);
+typedef void (*pfn_glGetBufferSubDataARB)(GLenum, GLintptr, GLsizeiptr, void *);
 static pfn_glGetBufferSubDataARB p_glGetBufferSubDataARB;
 static void gl_glGetBufferSubDataARB(Ctx *c)
 {
-    p_glGetBufferSubDataARB((GLenum)ARG(0), (GLintptrARB)ARG(1), (GLsizeiptrARB)ARG(2), gptr(ARG(3)));
+    p_glGetBufferSubDataARB((GLenum)ARG(0), (GLintptr)ARG(1), (GLsizeiptr)ARG(2), gptr(ARG(3)));
     GL_TRACE("glGetBufferSubDataARB");
     stdcall_ret(c, c->r[0], 4);
 }

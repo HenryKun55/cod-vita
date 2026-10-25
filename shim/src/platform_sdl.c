@@ -276,6 +276,21 @@ void platform_gl_init(void)
         rt_fatal(NULL, "SDL_GL_MakeCurrent: %s", SDL_GetError());
 }
 
+void *platform_gl_proc(const char *name)
+{
+    static int loaded;
+    if (!loaded) {
+        SDL_GL_LoadLibrary(NULL);
+        loaded = 1;
+    }
+    return SDL_GL_GetProcAddress(name);
+}
+
+void platform_set_swap_interval(int on)
+{
+    SDL_GL_SetSwapInterval(on ? 1 : 0);
+}
+
 void platform_gl_release(void)
 {
     SDL_GL_MakeCurrent(window, NULL);

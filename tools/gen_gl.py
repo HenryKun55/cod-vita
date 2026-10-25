@@ -46,6 +46,8 @@ def split_arg(a):
             return None
         return 'ptr', None
     t = a.split()[0]
+    t = {'GLsizeiptrARB': 'GLsizeiptr', 'GLintptrARB': 'GLintptr', 'GLhandleARB': 'GLuint',
+         'GLcharARB': 'GLchar'}.get(t, t)   # (vitaGL has only the core names)
     if t in INT_TYPES:
         return 'int', t
     if t in FLOAT_TYPES:

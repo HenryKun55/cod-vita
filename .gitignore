@@ -14,3 +14,4 @@ __pycache__/
 /repack/
 /run/
 build_cfg.log
+/build-vita-cfg.log

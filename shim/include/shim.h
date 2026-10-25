@@ -21,6 +21,7 @@ typedef struct HandleObj {
     int type;
     int fd;
     void *ptr;
+    char *path;     /* host path of a file (the read-ahead opens its own descriptor) */
 } HandleObj;
 
 uint32_t handle_new(int type);

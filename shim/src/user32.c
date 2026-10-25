@@ -19,6 +19,16 @@
 static uint32_t virt_count;
 static void show_main(Ctx *c, int show);
 
+/* Case-insensitive substring test (newlib has no strcasestr). */
+static int contains_ci(const char *s, const char *sub)
+{
+    size_t n = strlen(sub);
+    for (; *s; s++)
+        if (strncasecmp(s, sub, n) == 0)
+            return 1;
+    return 0;
+}
+
 #define WM_CREATE 0x0001u
 #define WM_DESTROY 0x0002u
 #define WM_SIZE 0x0005u
@@ -143,7 +153,7 @@ SHIM(user32, CreateWindowExA)
     }
     /* The dedicated console and the start-up splash are not shown: the game window
      * is the one SDL window. */
-    if (!proc || (cname && (strcasestr(cname, "console") || strcasestr(cname, "splash")))) {
+    if (!proc || (cname && (contains_ci(cname, "console") || contains_ci(cname, "splash")))) {
         uint32_t hv = HWND_VIRT_BASE + ++virt_count;
         rt_log("CreateWindowExA(%s, \"%s\") -> %08X (not the game window)", cname ? cname : "#atom",
                title ? gstr(title) : "", hv);

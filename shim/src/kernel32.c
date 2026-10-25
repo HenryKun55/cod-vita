@@ -79,6 +79,8 @@ void handle_close(uint32_t h)
     if (o->type == H_FILE) {
         free(o->ptr);
         o->ptr = NULL;
+        free(o->path);
+        o->path = NULL;
     }
     if (o->type == H_FIND && o->ptr) {
         free(o->ptr);
@@ -461,6 +463,7 @@ SHIM(kernel32, CreateFileA)
     g_bench_ctr.file_opens++;
     uint32_t h = handle_new(H_FILE);
     handle_get(h, H_FILE)->fd = fd;
+    handle_get(h, H_FILE)->path = rw ? NULL : strdup(path);
     win32_set_last_error(0);
     stdcall_ret(c, h, 7);
 }
@@ -555,6 +558,7 @@ static void pf_wait(Prefetch *p)
 
 typedef struct ReadBuf {
     Prefetch *pf;    /* next block read in the background (sequential readers) */
+    int pf_fd;       /* the background reads' own descriptor (0: not open yet) */
     off_t last_end;  /* end of the previous refill, to spot sequential reading */
     int active;      /* cur is the file position (else the descriptor's) */
     int size_ok;     /* size is known */
@@ -587,6 +591,10 @@ static void rb_release(HandleObj *o)
         pf_wait(b->pf);
         free(b->pf);
         b->pf = NULL;
+    }
+    if (b && b->pf_fd > 0) {
+        close(b->pf_fd);
+        b->pf_fd = 0;
     }
 }
 
@@ -658,11 +666,21 @@ static ssize_t rb_read(HandleObj *o, uint8_t *dst, uint32_t n)
         b->len = (uint32_t)got;
         b->last_end = b->base + got;
         /* A second sequential full block in a row: read the next one ahead. */
-        if (sequential && got == READ_AHEAD && pf_start()) {
-            if (!b->pf)
+        static int no_pf = -1;
+        if (no_pf < 0)
+            no_pf = getenv("COD_NO_PREFETCH") != NULL;
+        /* The background read has a descriptor of its own: on the Vita a pread on
+         * the game thread's descriptor moved its position under the game thread's
+         * lseek + read (the pk3 directories came out with pieces of other blocks). */
+        if (sequential && got == READ_AHEAD && !no_pf && o->path && pf_start()) {
+            if (!b->pf_fd)
+                b->pf_fd = open(o->path, O_RDONLY);
+            if (b->pf_fd < 0)
+                b->pf_fd = -1;
+            if (!b->pf && b->pf_fd > 0)
                 b->pf = calloc(1, sizeof(*b->pf));
             if (b->pf)
-                pf_request(b->pf, o->fd, b->last_end);
+                pf_request(b->pf, b->pf_fd, b->last_end);
         }
     }
     return total;
@@ -1191,9 +1209,24 @@ void kernel32_init(void)
 {
     if (!t0_us)
         t0_us = now_us();
-    /* COD_ARGS: extra command line (e.g. "+set r_mode 4 +devmap dawnville"). */
+    /* Extra command line (e.g. "+set r_mode 4 +map training"): COD_ARGS, or on the
+     * Vita the first line of ux0:data/cod1/args.txt. The Vita's default lowers the
+     * hunk (128 MiB on the PC; the guest space is 192 MiB). */
+    const char *args = getenv("COD_ARGS");
+#if defined(__vita__)
+    static char file_args[512];
+    FILE *af = fopen("ux0:data/cod1/args.txt", "r");
+    if (af) {
+        if (fgets(file_args, sizeof(file_args), af))
+            file_args[strcspn(file_args, "\r\n")] = 0;
+        fclose(af);
+        args = file_args;
+    } else {
+        args = "+set com_hunkMegs 96";
+    }
+#endif
     char line[1024];
-    snprintf(line, sizeof(line), "\"" WIN_INSTALL_DIR "\\CoDSP.exe\" %s", getenv("COD_ARGS") ? getenv("COD_ARGS") : "");
+    snprintf(line, sizeof(line), "\"" WIN_INSTALL_DIR "\\CoDSP.exe\" %s", args ? args : "");
     cmdline = scratch_strdup(line);
     env_block = scratch_alloc(4, 4);
     env_block_w = scratch_alloc(4, 4);

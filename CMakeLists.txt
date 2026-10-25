@@ -30,6 +30,29 @@ set(COD_MODULES
     "${COD_DIR}/uix86.dll@01DE0000")
 
 set(COD_PORT_VERSION "0.1.0")
+if(NOT COD_PORT_VERSION MATCHES "^([0-9]+)\\.([0-9])\\.([0-9])$")
+    message(FATAL_ERROR "COD_PORT_VERSION must be major.minor.patch with one-digit minor and patch")
+endif()
+math(EXPR COD_VERSION_MAJOR "${CMAKE_MATCH_1}")
+if(COD_VERSION_MAJOR LESS 10)
+    set(COD_VERSION_MAJOR "0${COD_VERSION_MAJOR}")
+endif()
+set(COD_APP_VER "${COD_VERSION_MAJOR}.${CMAKE_MATCH_2}${CMAKE_MATCH_3}")
+
+if(DEFINED VITA_ELF_CREATE)
+    # PlayStation Vita (vitasdk toolchain file).
+    set(VITA TRUE)
+    include("$ENV{VITASDK}/share/vita.cmake" REQUIRED)
+    set(VITA_TITLEID "CODS00001" CACHE STRING "Vita title id")
+    # ATTRIBUTE2=12: the extended memory mode (about 109 MiB more main memory); the
+    # guest space (192 MiB), the host side and vitaGL do not fit without it.
+    set(VITA_MKSFOEX_FLAGS "${VITA_MKSFOEX_FLAGS} -d ATTRIBUTE2=12")
+    set(VITA_VERSION "${COD_APP_VER}")
+    add_compile_definitions(__vita__)
+    add_compile_options(-mcpu=cortex-a9 -mfpu=neon -mfloat-abi=hard -fno-short-enums
+                        -ffunction-sections -fdata-sections -fno-pic -fno-pie)
+    add_link_options(-Wl,-q -Wl,--gc-sections -static -fno-short-enums -Wl,--no-warn-mismatch -Wl,-z,noexecstack)
+endif()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(GEN_DIR "${CMAKE_BINARY_DIR}/gen")
@@ -67,8 +90,10 @@ endif()
 
 file(GLOB RUNTIME_SOURCES CONFIGURE_DEPENDS runtime/src/*.c)
 file(GLOB SHIM_SOURCES CONFIGURE_DEPENDS shim/src/*.c)
-if(NOT VITA)
-    list(FILTER SHIM_SOURCES EXCLUDE REGEX "vita_[a-z]+\\.c$|platform_vita\\.c$")
+if(VITA)
+    list(FILTER SHIM_SOURCES EXCLUDE REGEX "platform_sdl\\.c$")
+else()
+    list(FILTER SHIM_SOURCES EXCLUDE REGEX "platform_vita\\.c$")
 endif()
 
 add_executable(cod1 ${RUNTIME_SOURCES} ${SHIM_SOURCES})
@@ -81,13 +106,47 @@ if(COD_PROFILE)
     target_compile_definitions(cod1 PRIVATE FF_PROFILE)
 endif()
 
-find_package(SDL2 REQUIRED)
-find_package(OpenGL REQUIRED)
-target_link_libraries(cod1 PRIVATE cod_recomp SDL2::SDL2 OpenGL::GL m)
-if(APPLE)
-    target_link_libraries(cod1 PRIVATE "-framework CoreFoundation")
-    # The legacy (compatibility) OpenGL API the game uses is deprecated on macOS.
-    target_compile_definitions(cod1 PRIVATE GL_SILENCE_DEPRECATION)
+if(VITA)
+    target_include_directories(cod1 PRIVATE "$ENV{VITASDK}/arm-vita-eabi/include/SDL2")
+    # The private vitaGL build (tools/build_vitagl_vita.sh, or the one of a sibling port).
+    set(COD_VITAGL_DIR "${CMAKE_SOURCE_DIR}/deps/vita" CACHE PATH "Prefix of the private vitaGL build")
+    if(EXISTS "${COD_VITAGL_DIR}/lib/libvitaGL.a")
+        message(STATUS "Using the private vitaGL in ${COD_VITAGL_DIR}")
+        target_include_directories(cod1 BEFORE PRIVATE "${COD_VITAGL_DIR}/include")
+        set(COD_VITAGL_LIB "${COD_VITAGL_DIR}/lib/libvitaGL.a")
+    else()
+        message(STATUS "Private vitaGL not built: using the SDK's (tools/build_vitagl_vita.sh)")
+        set(COD_VITAGL_LIB vitaGL)
+    endif()
+    target_link_libraries(cod1 PRIVATE cod_recomp
+        SDL2 ${COD_VITAGL_LIB} vitashark SceShaccCgExt mathneon taihen_stub
+        SceShaccCg_stub SceKernelDmacMgr_stub SceCtrl_stub SceTouch_stub SceHid_stub SceMotion_stub
+        SceAudio_stub SceAudioIn_stub SceDisplay_stub SceGxm_stub SceCommonDialog_stub SceSysmodule_stub
+        ScePower_stub SceAppMgr_stub SceAppUtil_stub SceIme_stub SceLibKernel_stub SceProcessmgr_stub
+        SceIofilemgr_stub png z stdc++ pthread m c)
+    # LiveArea pictures (pic0.png is also the boot picture) from the game's own art.
+    set(COD_SCE_SYS "${CMAKE_BINARY_DIR}/sce_sys")
+    file(COPY "${CMAKE_SOURCE_DIR}/platform/vita/sce_sys/" DESTINATION "${COD_SCE_SYS}")
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/make_vita_livearea.py" "${COD_DIR}" "${COD_SCE_SYS}"
+        RESULT_VARIABLE COD_LIVEAREA_RESULT)
+    if(NOT COD_LIVEAREA_RESULT EQUAL 0)
+        message(FATAL_ERROR "tools/make_vita_livearea.py failed (it needs Pillow: pip install Pillow)")
+    endif()
+    vita_create_self(eboot.bin cod1 UNSAFE)
+    vita_create_vpk(cod1.vpk ${VITA_TITLEID} eboot.bin
+        VERSION ${VITA_VERSION}
+        NAME "Call of Duty"
+        FILE ${COD_SCE_SYS} sce_sys)
 else()
-    target_link_libraries(cod1 PRIVATE pthread)
+    find_package(SDL2 REQUIRED)
+    find_package(OpenGL REQUIRED)
+    target_link_libraries(cod1 PRIVATE cod_recomp SDL2::SDL2 OpenGL::GL m)
+    if(APPLE)
+        target_link_libraries(cod1 PRIVATE "-framework CoreFoundation")
+        # The legacy (compatibility) OpenGL API the game uses is deprecated on macOS.
+        target_compile_definitions(cod1 PRIVATE GL_SILENCE_DEPRECATION)
+    else()
+        target_link_libraries(cod1 PRIVATE pthread)
+    endif()
 endif()
