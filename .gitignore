@@ -1,0 +1,16 @@
+# Retail game data and anything derived from it never goes into the repo.
+/gamedata/
+/build*/
+*.log
+__pycache__/
+.DS_Store
+/deps/
+/graphify-out/
+# Local extraction work (disc images, patch, repack tooling)
+/iso/
+/cd1/
+/cd2/
+/patch15/
+/repack/
+/run/
+build_cfg.log

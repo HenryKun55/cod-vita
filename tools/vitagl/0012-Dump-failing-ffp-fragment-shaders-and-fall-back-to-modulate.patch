@@ -1,0 +1,82 @@
+--- a/source/ffp.c
++++ b/source/ffp.c
+@@ -344,8 +344,40 @@
+ 		ptr += 4;
+ 	}
+ 	ffp_fragment_params = fragment_params;
++}
++
++
++// Messages of the shader compiler while ffp_failed_shader_dump recompiles a failed shader.
++static char ffp_shark_msgs[4096];
++static void ffp_shark_log(const char *msg, shark_log_level level, int line) {
++	size_t n = strlen(ffp_shark_msgs);
++	snprintf(ffp_shark_msgs + n, sizeof(ffp_shark_msgs) - n, "%d: %s\n", line, msg);
+ }
+ 
++// Writes a fragment shader that did not compile, with the compiler's messages, to
++// ux0:data/shader_fail_<n>.txt.
++static void ffp_failed_shader_dump(const char *cache_name, const char *src) {
++	static int count = 0;
++	char path[64];
++	ffp_shark_msgs[0] = 0;
++	shark_install_log_cb(ffp_shark_log);
++	uint32_t size = strlen(src);
++	shark_compile_shader_extended(src, &size, SHARK_FRAGMENT_SHADER, compiler_opts, compiler_fastmath, compiler_fastprecision, compiler_fastint);
++	shark_install_log_cb(NULL);
++	shark_clear_output();
++	sprintf(path, "ux0:data/shader_fail_%d.txt", count++);
++	SceUID f = sceIoOpen(path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
++	if (f >= 0) {
++		sceIoWrite(f, cache_name, strlen(cache_name));
++		sceIoWrite(f, "\n--- messages ---\n", 18);
++		sceIoWrite(f, ffp_shark_msgs, strlen(ffp_shark_msgs));
++		sceIoWrite(f, "--- source ---\n", 15);
++		sceIoWrite(f, src, strlen(src));
++		sceIoClose(f);
++	}
++}
++
++
+ #ifndef DISABLE_TEXTURE_COMBINER
+ void setup_combiner_pass(int i, char *dst) {
+ 	char tmp[2048];
+@@ -1348,6 +1380,23 @@
+ #endif
+ 			uint32_t size = strlen(fshader);
+ 			SceGxmProgram *t = shark_compile_shader_extended(fshader, &size, SHARK_FRAGMENT_SHADER, compiler_opts, compiler_fastmath, compiler_fastprecision, compiler_fastint);
++			if (!t) {
++				// The generated combiner code did not compile: keep its source and the
++				// compiler's messages, then fall back to plain texture * color modulation.
++				ffp_failed_shader_dump(fname, fshader);
++#ifdef HAVE_HIGH_FFP_TEXUNITS
++				sprintf(fshader, ffp_frag_src, modulate_src, alpha_op,
++					mask.num_textures, mask.has_colors, mask.fog_mode, MODULATE, MODULATE, MODULATE,
++					mask.lights_num, mask.shading_mode, mask.point_sprite, mask.fast_perspective_correction, mask.srgb_mode, mask.fog_coord);
++#else
++				sprintf(fshader, ffp_frag_src, modulate_src, alpha_op,
++					mask.num_textures, mask.has_colors, mask.fog_mode, MODULATE, MODULATE,
++					mask.lights_num, mask.shading_mode, mask.point_sprite, mask.fast_perspective_correction, mask.srgb_mode, mask.fog_coord);
++#endif
++				size = strlen(fshader);
++				t = shark_compile_shader_extended(fshader, &size, SHARK_FRAGMENT_SHADER, compiler_opts, compiler_fastmath, compiler_fastprecision, compiler_fastint);
++				fname[0] = 0;   // not cached: the next run tries the real shader again
++			}
+ #ifdef DUMP_SHADER_SOURCES
+ 			if (t) {
+ #endif
+@@ -1356,9 +1405,11 @@
+ 			shark_clear_output();
+ 
+ 			// Saving compiled shader in filesystem cache
+-			f = sceIoOpen(fname, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
+-			sceIoWrite(f, ffp_fragment_program, size);
+-			sceIoClose(f);
++			if (fname[0]) {
++				f = sceIoOpen(fname, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
++				sceIoWrite(f, ffp_fragment_program, size);
++				sceIoClose(f);
++			}
+ #ifdef DUMP_SHADER_SOURCES
+ 			}
+ #ifndef DISABLE_TEXTURE_COMBINER
