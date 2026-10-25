@@ -648,6 +648,23 @@ static uint32_t scan_to_vk(uint32_t sc)
     return 0;
 }
 
+/* Virtual key of a DirectInput key code (a scan code, 0x80 = extended). */
+uint32_t user32_dik_to_vk(uint8_t dik)
+{
+    switch (dik) {
+    case 0xC8: return 0x26u;   /* up */
+    case 0xD0: return 0x28u;   /* down */
+    case 0xCB: return 0x25u;   /* left */
+    case 0xCD: return 0x27u;   /* right */
+    case 0x9D: return 0x11u;   /* right control */
+    case 0xB8: return 0x12u;   /* right alt */
+    case 0x9C: return 0x0Du;   /* keypad enter */
+    case 0x1D: return 0x11u;   /* left control */
+    case 0x2A: case 0x36: return 0x10u;   /* shifts */
+    default: return dik & 0x80 ? 0u : scan_to_vk(dik);
+    }
+}
+
 static uint32_t map_vk(uint32_t code, uint32_t type)
 {
     switch (type) {

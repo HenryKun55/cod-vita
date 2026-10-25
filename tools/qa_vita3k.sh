@@ -61,7 +61,7 @@ mkdir -p "$APP" "$DATA"
 (cd "$APP" && unzip -q -o "$BUILD/cod1.vpk") || exit 1
 ln -sfn "$ROOT/gamedata/pc" "$DATA/pc"
 printf '%s' "$SCRIPT" > "$DATA/input.txt"
-rm -f "$DATA/shot_now.txt" "$DATA/cod1.log" "$DATA/args.txt"
+rm -f "$DATA/shot_now.txt" "$DATA/cod1.log" "$DATA/args.txt" "$DATA/profile.txt"
 if [ -n "${ARGS:-}" ]; then printf '%s\n' "$ARGS" > "$DATA/args.txt"; fi
 rm -f "$DATA/env.txt"
 if [ -n "${ENV:-}" ]; then printf '%s\n' "$ENV" | tr ';' '\n' > "$DATA/env.txt"; fi
@@ -106,4 +106,5 @@ while [ $waited -lt $((TIMEOUT * 2)) ] && pgrep -f "$MATCH" > /dev/null; do
 done
 stop
 cp "$DATA/cod1.log" "$OUT/cod1.log" 2>/dev/null
+if [ -s "$DATA/profile.txt" ]; then cp "$DATA/profile.txt" "$OUT/profile.txt"; echo "profile: $OUT/profile.txt"; fi
 echo "$shots screenshot(s) in $OUT; log: $OUT/cod1.log"

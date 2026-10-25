@@ -139,9 +139,22 @@ void platform_set_video_mode(int w, int h)
     mode_h = h;
 }
 
-/* On the thread that makes every GL call (see render_queue.c). */
+#ifdef FF_PROFILE
+/* Phase markers inside the private vitaGL (VGL_PROF_HOOKS): written where the
+ * profiler reads the running code's id. */
+extern volatile uint32_t *vgl_prof_slot __attribute__((weak));
+extern uint32_t vgl_prof_base __attribute__((weak));
+#endif
+
+/* On the game thread, which makes every GL call. */
 void platform_gl_init(void)
 {
+#ifdef FF_PROFILE
+    if (&vgl_prof_slot && &vgl_prof_base) {
+        vgl_prof_base = PROF_H_VGL;
+        vgl_prof_slot = &rt_prof_main.cur;
+    }
+#endif
     if (!gl_ready) {
         /* 8 MiB for immediate-mode/legacy state; textures go to vitaGL's own pools.
          * vitaGL takes all the main RAM but ram_threshold for its pools: what stays

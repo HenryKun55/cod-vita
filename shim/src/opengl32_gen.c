@@ -3,16 +3,24 @@
 #include "opengl32.h"
 
 void glm_glViewport(Ctx *c);
+void glm_glVertexPointer(Ctx *c);
 void glm_glUnlockArraysEXT(Ctx *c);
 void glm_glTexImage2D(Ctx *c);
+void glm_glTexCoordPointer(Ctx *c);
 void glm_glScissor(Ctx *c);
 void glm_glReadPixels(Ctx *c);
+void glm_glNormalPointer(Ctx *c);
 void glm_glLockArraysEXT(Ctx *c);
 void glm_glGetString(Ctx *c);
+void glm_glDrawRangeElementsEXT(Ctx *c);
+void glm_glDrawRangeElements(Ctx *c);
 void glm_glCompressedTexSubImage2DARB(Ctx *c);
 void glm_glCompressedTexSubImage2D(Ctx *c);
 void glm_glCompressedTexImage2DARB(Ctx *c);
 void glm_glCompressedTexImage2D(Ctx *c);
+void glm_glColorPointer(Ctx *c);
+void glm_glClientActiveTextureARB(Ctx *c);
+void glm_glClientActiveTexture(Ctx *c);
 typedef void (*pfn_glAccum)(GLenum, GLfloat);
 static pfn_glAccum p_glAccum;
 static void gl_glAccum(Ctx *c)
@@ -208,24 +216,6 @@ static void gl_glClearStencil(Ctx *c)
 {
     p_glClearStencil((GLint)ARG(0));
     GL_TRACE("glClearStencil");
-    stdcall_ret(c, c->r[0], 1);
-}
-
-typedef void (*pfn_glClientActiveTexture)(GLenum);
-static pfn_glClientActiveTexture p_glClientActiveTexture;
-static void gl_glClientActiveTexture(Ctx *c)
-{
-    p_glClientActiveTexture((GLenum)ARG(0));
-    GL_TRACE("glClientActiveTexture");
-    stdcall_ret(c, c->r[0], 1);
-}
-
-typedef void (*pfn_glClientActiveTextureARB)(GLenum);
-static pfn_glClientActiveTextureARB p_glClientActiveTextureARB;
-static void gl_glClientActiveTextureARB(Ctx *c)
-{
-    p_glClientActiveTextureARB((GLenum)ARG(0));
-    GL_TRACE("glClientActiveTextureARB");
     stdcall_ret(c, c->r[0], 1);
 }
 
@@ -544,15 +534,6 @@ static void gl_glColorMaterial(Ctx *c)
     stdcall_ret(c, c->r[0], 2);
 }
 
-typedef void (*pfn_glColorPointer)(GLint, GLenum, GLsizei, void *);
-static pfn_glColorPointer p_glColorPointer;
-static void gl_glColorPointer(Ctx *c)
-{
-    p_glColorPointer((GLint)ARG(0), (GLenum)ARG(1), (GLsizei)ARG(2), gptr(ARG(3)));
-    GL_TRACE("glColorPointer");
-    stdcall_ret(c, c->r[0], 4);
-}
-
 typedef void (*pfn_glCombinerInputNV)(GLenum, GLenum, GLenum, GLenum, GLenum, GLenum);
 static pfn_glCombinerInputNV p_glCombinerInputNV;
 static void gl_glCombinerInputNV(Ctx *c)
@@ -866,24 +847,6 @@ static void gl_glDrawPixels(Ctx *c)
     p_glDrawPixels((GLsizei)ARG(0), (GLsizei)ARG(1), (GLenum)ARG(2), (GLenum)ARG(3), gptr(ARG(4)));
     GL_TRACE("glDrawPixels");
     stdcall_ret(c, c->r[0], 5);
-}
-
-typedef void (*pfn_glDrawRangeElements)(GLenum, GLuint, GLuint, GLsizei, GLenum, void *);
-static pfn_glDrawRangeElements p_glDrawRangeElements;
-static void gl_glDrawRangeElements(Ctx *c)
-{
-    p_glDrawRangeElements((GLenum)ARG(0), (GLuint)ARG(1), (GLuint)ARG(2), (GLsizei)ARG(3), (GLenum)ARG(4), gptr(ARG(5)));
-    GL_TRACE("glDrawRangeElements");
-    stdcall_ret(c, c->r[0], 6);
-}
-
-typedef void (*pfn_glDrawRangeElementsEXT)(GLenum, GLuint, GLuint, GLsizei, GLenum, void *);
-static pfn_glDrawRangeElementsEXT p_glDrawRangeElementsEXT;
-static void gl_glDrawRangeElementsEXT(Ctx *c)
-{
-    p_glDrawRangeElementsEXT((GLenum)ARG(0), (GLuint)ARG(1), (GLuint)ARG(2), (GLsizei)ARG(3), (GLenum)ARG(4), gptr(ARG(5)));
-    GL_TRACE("glDrawRangeElementsEXT");
-    stdcall_ret(c, c->r[0], 6);
 }
 
 typedef void (*pfn_glEdgeFlag)(GLboolean);
@@ -2182,15 +2145,6 @@ static void gl_glNormal3sv(Ctx *c)
     stdcall_ret(c, c->r[0], 1);
 }
 
-typedef void (*pfn_glNormalPointer)(GLenum, GLsizei, void *);
-static pfn_glNormalPointer p_glNormalPointer;
-static void gl_glNormalPointer(Ctx *c)
-{
-    p_glNormalPointer((GLenum)ARG(0), (GLsizei)ARG(1), gptr(ARG(2)));
-    GL_TRACE("glNormalPointer");
-    stdcall_ret(c, c->r[0], 3);
-}
-
 typedef void (*pfn_glOrtho)(GLdouble, GLdouble, GLdouble, GLdouble, GLdouble, GLdouble);
 static pfn_glOrtho p_glOrtho;
 static void gl_glOrtho(Ctx *c)
@@ -3172,15 +3126,6 @@ static void gl_glTexCoord4sv(Ctx *c)
     stdcall_ret(c, c->r[0], 1);
 }
 
-typedef void (*pfn_glTexCoordPointer)(GLint, GLenum, GLsizei, void *);
-static pfn_glTexCoordPointer p_glTexCoordPointer;
-static void gl_glTexCoordPointer(Ctx *c)
-{
-    p_glTexCoordPointer((GLint)ARG(0), (GLenum)ARG(1), (GLsizei)ARG(2), gptr(ARG(3)));
-    GL_TRACE("glTexCoordPointer");
-    stdcall_ret(c, c->r[0], 4);
-}
-
 typedef void (*pfn_glTexEnvf)(GLenum, GLenum, GLfloat);
 static pfn_glTexEnvf p_glTexEnvf;
 static void gl_glTexEnvf(Ctx *c)
@@ -3919,15 +3864,6 @@ static void gl_glVertexAttribPointerARB(Ctx *c)
     stdcall_ret(c, c->r[0], 6);
 }
 
-typedef void (*pfn_glVertexPointer)(GLint, GLenum, GLsizei, void *);
-static pfn_glVertexPointer p_glVertexPointer;
-static void gl_glVertexPointer(Ctx *c)
-{
-    p_glVertexPointer((GLint)ARG(0), (GLenum)ARG(1), (GLsizei)ARG(2), gptr(ARG(3)));
-    GL_TRACE("glVertexPointer");
-    stdcall_ret(c, c->r[0], 4);
-}
-
 const GlEntry g_gl_entries[] = {
     { "glAccum", gl_glAccum, (void **)&p_glAccum },
     { "glActiveTexture", gl_glActiveTexture, (void **)&p_glActiveTexture },
@@ -3951,8 +3887,8 @@ const GlEntry g_gl_entries[] = {
     { "glClearDepth", gl_glClearDepth, (void **)&p_glClearDepth },
     { "glClearIndex", gl_glClearIndex, (void **)&p_glClearIndex },
     { "glClearStencil", gl_glClearStencil, (void **)&p_glClearStencil },
-    { "glClientActiveTexture", gl_glClientActiveTexture, (void **)&p_glClientActiveTexture },
-    { "glClientActiveTextureARB", gl_glClientActiveTextureARB, (void **)&p_glClientActiveTextureARB },
+    { "glClientActiveTexture", glm_glClientActiveTexture, NULL },
+    { "glClientActiveTextureARB", glm_glClientActiveTextureARB, NULL },
     { "glClipPlane", gl_glClipPlane, (void **)&p_glClipPlane },
     { "glColor3b", gl_glColor3b, (void **)&p_glColor3b },
     { "glColor3bv", gl_glColor3bv, (void **)&p_glColor3bv },
@@ -3988,7 +3924,7 @@ const GlEntry g_gl_entries[] = {
     { "glColor4usv", gl_glColor4usv, (void **)&p_glColor4usv },
     { "glColorMask", gl_glColorMask, (void **)&p_glColorMask },
     { "glColorMaterial", gl_glColorMaterial, (void **)&p_glColorMaterial },
-    { "glColorPointer", gl_glColorPointer, (void **)&p_glColorPointer },
+    { "glColorPointer", glm_glColorPointer, NULL },
     { "glCombinerInputNV", gl_glCombinerInputNV, (void **)&p_glCombinerInputNV },
     { "glCombinerOutputNV", gl_glCombinerOutputNV, (void **)&p_glCombinerOutputNV },
     { "glCombinerParameterfNV", gl_glCombinerParameterfNV, (void **)&p_glCombinerParameterfNV },
@@ -4028,8 +3964,8 @@ const GlEntry g_gl_entries[] = {
     { "glDrawBuffer", gl_glDrawBuffer, (void **)&p_glDrawBuffer },
     { "glDrawElements", gl_glDrawElements, (void **)&p_glDrawElements },
     { "glDrawPixels", gl_glDrawPixels, (void **)&p_glDrawPixels },
-    { "glDrawRangeElements", gl_glDrawRangeElements, (void **)&p_glDrawRangeElements },
-    { "glDrawRangeElementsEXT", gl_glDrawRangeElementsEXT, (void **)&p_glDrawRangeElementsEXT },
+    { "glDrawRangeElements", glm_glDrawRangeElements, NULL },
+    { "glDrawRangeElementsEXT", glm_glDrawRangeElementsEXT, NULL },
     { "glEdgeFlag", gl_glEdgeFlag, (void **)&p_glEdgeFlag },
     { "glEdgeFlagPointer", gl_glEdgeFlagPointer, (void **)&p_glEdgeFlagPointer },
     { "glEdgeFlagv", gl_glEdgeFlagv, (void **)&p_glEdgeFlagv },
@@ -4176,7 +4112,7 @@ const GlEntry g_gl_entries[] = {
     { "glNormal3iv", gl_glNormal3iv, (void **)&p_glNormal3iv },
     { "glNormal3s", gl_glNormal3s, (void **)&p_glNormal3s },
     { "glNormal3sv", gl_glNormal3sv, (void **)&p_glNormal3sv },
-    { "glNormalPointer", gl_glNormalPointer, (void **)&p_glNormalPointer },
+    { "glNormalPointer", glm_glNormalPointer, NULL },
     { "glOrtho", gl_glOrtho, (void **)&p_glOrtho },
     { "glPNTrianglesfATI", gl_glPNTrianglesfATI, (void **)&p_glPNTrianglesfATI },
     { "glPNTrianglesiATI", gl_glPNTrianglesiATI, (void **)&p_glPNTrianglesiATI },
@@ -4288,7 +4224,7 @@ const GlEntry g_gl_entries[] = {
     { "glTexCoord4iv", gl_glTexCoord4iv, (void **)&p_glTexCoord4iv },
     { "glTexCoord4s", gl_glTexCoord4s, (void **)&p_glTexCoord4s },
     { "glTexCoord4sv", gl_glTexCoord4sv, (void **)&p_glTexCoord4sv },
-    { "glTexCoordPointer", gl_glTexCoordPointer, (void **)&p_glTexCoordPointer },
+    { "glTexCoordPointer", glm_glTexCoordPointer, NULL },
     { "glTexEnvf", gl_glTexEnvf, (void **)&p_glTexEnvf },
     { "glTexEnvfv", gl_glTexEnvfv, (void **)&p_glTexEnvfv },
     { "glTexEnvi", gl_glTexEnvi, (void **)&p_glTexEnvi },
@@ -4373,7 +4309,7 @@ const GlEntry g_gl_entries[] = {
     { "glVertexAttrib4uivARB", gl_glVertexAttrib4uivARB, (void **)&p_glVertexAttrib4uivARB },
     { "glVertexAttrib4usvARB", gl_glVertexAttrib4usvARB, (void **)&p_glVertexAttrib4usvARB },
     { "glVertexAttribPointerARB", gl_glVertexAttribPointerARB, (void **)&p_glVertexAttribPointerARB },
-    { "glVertexPointer", gl_glVertexPointer, (void **)&p_glVertexPointer },
+    { "glVertexPointer", glm_glVertexPointer, NULL },
     { "glViewport", glm_glViewport, NULL },
 };
 const unsigned g_gl_entry_count = 446;

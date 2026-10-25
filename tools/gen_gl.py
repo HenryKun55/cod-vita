@@ -20,7 +20,9 @@ import sys
 # Implemented by hand in shim/src/opengl32.c.
 MANUAL = {'glGetString', 'glViewport', 'glScissor', 'glLockArraysEXT', 'glUnlockArraysEXT', 'glReadPixels',
           'glTexImage2D', 'glCompressedTexImage2D', 'glCompressedTexImage2DARB', 'glCompressedTexSubImage2D',
-          'glCompressedTexSubImage2DARB'}
+          'glCompressedTexSubImage2DARB', 'glVertexPointer', 'glColorPointer', 'glTexCoordPointer',
+          'glNormalPointer', 'glClientActiveTexture', 'glClientActiveTextureARB', 'glDrawRangeElements',
+          'glDrawRangeElementsEXT'}
 
 INT_TYPES = {'GLenum', 'GLboolean', 'GLbitfield', 'GLbyte', 'GLshort', 'GLint', 'GLsizei', 'GLubyte', 'GLushort',
              'GLuint', 'GLhandleARB', 'GLintptr', 'GLsizeiptr', 'GLintptrARB', 'GLsizeiptrARB', 'GLchar',

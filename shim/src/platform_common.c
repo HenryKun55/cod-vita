@@ -38,18 +38,20 @@ int platform_pop_key_event(KeyEvent *out)
 }
 
 /* Press or release a key the way the real keyboard does: the Win32 key messages
- * (the game reads every key from WM_KEYDOWN / WM_KEYUP, by the scan code in lParam;
- * DIK codes are scan codes, 0x80 the extended-key bit) and WM_CHAR for Enter and
- * Esc, which the menus' text fields read. */
+ * (WM_KEYDOWN / WM_KEYUP with the virtual key and the scan code; DIK codes are scan
+ * codes, 0x80 the extended-key bit) and WM_CHAR for Enter and Esc, which the
+ * menus' text fields read. */
+uint32_t user32_dik_to_vk(uint8_t dik);
+
 void platform_key(uint8_t dik, int down)
 {
     g_key_state[dik] = down ? 0x80 : 0;
     platform_push_key(dik, down);
     uint32_t lparam = 1u | ((uint32_t)(dik & 0x7F) << 16) | ((dik & 0x80) ? 0x01000000u : 0u) |
                       (down ? 0u : 0xC0000000u);
-    uint32_t vk = dik == 0x01 ? 0x1Bu : dik == 0x1C ? 0x0Du : 0u;
+    uint32_t vk = user32_dik_to_vk(dik);
     user32_post_message(down ? 0x0100u : 0x0101u, vk, lparam);
-    if (down && vk)
+    if (down && (vk == 0x0Du || vk == 0x1Bu))
         user32_post_message(0x0102, vk, lparam);   /* WM_CHAR */
 }
 

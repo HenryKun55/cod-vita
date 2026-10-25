@@ -284,6 +284,135 @@ void glm_glCompressedTexImage2DARB(Ctx *c) { compressed_image(c, "glCompressedTe
 void glm_glCompressedTexSubImage2D(Ctx *c) { compressed_subimage(c, "glCompressedTexSubImage2D"); }
 void glm_glCompressedTexSubImage2DARB(Ctx *c) { compressed_subimage(c, "glCompressedTexSubImage2DARB"); }
 
+/* ---- client arrays and ranged draws ------------------------------------------
+ * The game draws ranges of large shared vertex arrays with glDrawRangeElements.
+ * vitaGL copies the client arrays from vertex 0 to `end` for every draw, so here
+ * the arrays are moved to start at `start` (and the indices lowered by it) and
+ * only the range is copied. The pointers are tracked for that and put back after. */
+
+typedef struct ClientArray {
+    GLint size;
+    GLenum type;
+    GLsizei stride;
+    uint32_t ptr;        /* guest address (0: none set) */
+} ClientArray;
+
+#define MAX_TEXUNITS 8
+static ClientArray va_vertex, va_color, va_normal, va_tex[MAX_TEXUNITS];
+static unsigned va_client_unit;
+
+static uint32_t type_size(GLenum t)
+{
+    switch (t) {
+    case GL_BYTE: case GL_UNSIGNED_BYTE: return 1;
+    case GL_SHORT: case GL_UNSIGNED_SHORT: return 2;
+    default: return 4;
+    }
+}
+
+static uint32_t array_stride(const ClientArray *a)
+{
+    return a->stride ? (uint32_t)a->stride : (uint32_t)a->size * type_size(a->type);
+}
+
+static void set_vertex(const ClientArray *a, uint32_t off) { glVertexPointer(a->size, a->type, a->stride, gptr(a->ptr + off)); }
+static void set_color(const ClientArray *a, uint32_t off) { glColorPointer(a->size, a->type, a->stride, gptr(a->ptr + off)); }
+static void set_normal(const ClientArray *a, uint32_t off) { glNormalPointer(a->type, a->stride, gptr(a->ptr + off)); }
+static void set_tex(const ClientArray *a, uint32_t off) { glTexCoordPointer(a->size, a->type, a->stride, gptr(a->ptr + off)); }
+
+void glm_glVertexPointer(Ctx *c)
+{
+    va_vertex = (ClientArray){ (GLint)ARG(0), (GLenum)ARG(1), (GLsizei)ARG(2), ARG(3) };
+    set_vertex(&va_vertex, 0);
+    stdcall_ret(c, c->r[0], 4);
+}
+
+void glm_glColorPointer(Ctx *c)
+{
+    va_color = (ClientArray){ (GLint)ARG(0), (GLenum)ARG(1), (GLsizei)ARG(2), ARG(3) };
+    set_color(&va_color, 0);
+    stdcall_ret(c, c->r[0], 4);
+}
+
+void glm_glNormalPointer(Ctx *c)
+{
+    va_normal = (ClientArray){ 3, (GLenum)ARG(0), (GLsizei)ARG(1), ARG(2) };
+    set_normal(&va_normal, 0);
+    stdcall_ret(c, c->r[0], 3);
+}
+
+void glm_glTexCoordPointer(Ctx *c)
+{
+    if (va_client_unit < MAX_TEXUNITS)
+        va_tex[va_client_unit] = (ClientArray){ (GLint)ARG(0), (GLenum)ARG(1), (GLsizei)ARG(2), ARG(3) };
+    glTexCoordPointer((GLint)ARG(0), (GLenum)ARG(1), (GLsizei)ARG(2), gptr(ARG(3)));
+    stdcall_ret(c, c->r[0], 4);
+}
+
+static void client_active(Ctx *c)
+{
+    GLenum unit = (GLenum)ARG(0);
+    va_client_unit = unit - GL_TEXTURE0;
+    glClientActiveTexture(unit);
+    stdcall_ret(c, c->r[0], 1);
+}
+
+void glm_glClientActiveTexture(Ctx *c) { client_active(c); }
+void glm_glClientActiveTextureARB(Ctx *c) { client_active(c); }
+
+/* Moves every set array by `first` vertices (0: back where the game put them). */
+static void shift_arrays(uint32_t first)
+{
+    if (va_vertex.ptr)
+        set_vertex(&va_vertex, first * array_stride(&va_vertex));
+    if (va_color.ptr)
+        set_color(&va_color, first * array_stride(&va_color));
+    if (va_normal.ptr)
+        set_normal(&va_normal, first * array_stride(&va_normal));
+    for (unsigned u = 0; u < MAX_TEXUNITS; u++) {
+        if (!va_tex[u].ptr)
+            continue;
+        glClientActiveTexture(GL_TEXTURE0 + u);
+        set_tex(&va_tex[u], first * array_stride(&va_tex[u]));
+    }
+    glClientActiveTexture(GL_TEXTURE0 + va_client_unit);
+}
+
+static void draw_range(Ctx *c)
+{
+    GLenum mode = (GLenum)ARG(0), type = (GLenum)ARG(4);
+    GLuint start = (GLuint)ARG(1), end = (GLuint)ARG(2);
+    GLsizei count = (GLsizei)ARG(3);
+    uint32_t idx = ARG(5);
+    if (start == 0 || count <= 0 || end < start || (type != GL_UNSIGNED_SHORT && type != GL_UNSIGNED_INT)) {
+        glDrawRangeElements(mode, start, end, count, type, gptr(idx));
+        stdcall_ret(c, c->r[0], 6);
+        return;
+    }
+    static uint16_t *tmp16;
+    static uint32_t cap;
+    if ((uint32_t)count > cap) {
+        cap = (uint32_t)count * 2u;
+        tmp16 = realloc(tmp16, cap * sizeof(uint16_t));
+    }
+    int fits16 = end - start < 65536u;
+    if (fits16 && tmp16) {
+        for (GLsizei i = 0; i < count; i++) {
+            uint32_t v = type == GL_UNSIGNED_SHORT ? RD16(idx + 2u * (uint32_t)i) : RD32(idx + 4u * (uint32_t)i);
+            tmp16[i] = (uint16_t)(v - start);
+        }
+        shift_arrays(start);
+        glDrawRangeElements(mode, 0, end - start, count, GL_UNSIGNED_SHORT, tmp16);
+        shift_arrays(0);
+    } else {
+        glDrawRangeElements(mode, start, end, count, type, gptr(idx));
+    }
+    stdcall_ret(c, c->r[0], 6);
+}
+
+void glm_glDrawRangeElements(Ctx *c) { draw_range(c); }
+void glm_glDrawRangeElementsEXT(Ctx *c) { draw_range(c); }
+
 /* Compiled vertex arrays are only a hint. */
 void glm_glLockArraysEXT(Ctx *c) { stdcall_ret(c, c->r[0], 2); }
 void glm_glUnlockArraysEXT(Ctx *c) { stdcall_ret(c, c->r[0], 0); }
