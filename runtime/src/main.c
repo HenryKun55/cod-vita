@@ -382,6 +382,7 @@ int main(int argc, char **argv)
 
     mem_init();
     mem_report("start");
+    rt_log("guest memory at host %p..%p", (void *)g_mem, (void *)(g_mem + g_guest_mem_size));
     if (getenv("COD_LOG_CALLS"))
         log_calls_at = atof(getenv("COD_LOG_CALLS"));
     uint32_t entry = module_load_exe();

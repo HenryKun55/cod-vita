@@ -527,6 +527,129 @@ static uint32_t ds_frames;
 static uint32_t ds_ptrs[16];
 static unsigned ds_nptrs;
 
+static void draw_stats_frame(void);
+
+/* ---- static geometry in buffer objects ------------------------------------------
+ * The world's vertex arrays live in the game's hunk and do not change while a
+ * level is played, yet every frame drew ~17 MB of them, which vitaGL copies to
+ * GPU memory per draw. Each interleaved vertex block in the hunk gets one buffer
+ * object holding the union of the ranges drawn from it (looking around must not
+ * multiply copies: one buffer per range ran vitaGL out of memory), with a shadow
+ * copy: every draw compares 16 words of its range and uploads the range again if
+ * they changed (a new level reuses the hunk); a block that keeps changing is
+ * dynamic and drawn from client memory. Arrays inside the executable's image (the
+ * tess arrays, rewritten every frame) are never cached. */
+
+typedef struct VboEntry {
+    uint32_t ptr, stride, esize;   /* key: the array (one buffer per array) */
+    uint32_t lo, hi;               /* vertices held: lo..hi */
+    GLuint buf;
+    uint8_t *shadow;               /* what the buffer holds, to spot changes */
+    uint32_t changes;              /* content changes seen; past a few the array is dynamic */
+    int dynamic;
+    uint32_t last_use;
+} VboEntry;
+
+#define VBO_SLOTS 64u
+#define VBO_MAX_BYTES (16u << 20)  /* larger arrays are not cached */
+#define VBO_DYNAMIC_AFTER 4u
+static VboEntry vbo_cache[VBO_SLOTS];
+static uint32_t vbo_frame;
+static int vbo_on = -1;
+
+static uint32_t vbo_bytes(const VboEntry *e) { return (e->hi - e->lo) * e->stride + e->esize; }
+
+static int vbo_upload(VboEntry *e)
+{
+    uint32_t base = e->ptr + e->lo * e->stride, bytes = vbo_bytes(e);
+    uint8_t *sh = realloc(e->shadow, bytes);
+    if (!sh)
+        return 0;
+    e->shadow = sh;
+    memcpy(sh, gptr(base), bytes);
+    glBindBuffer(GL_ARRAY_BUFFER, e->buf);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizei)bytes, sh, GL_STATIC_DRAW);
+    return 1;
+}
+
+/* Whether the guest bytes of start..end still equal the shadow (16 words spread
+ * over the range, its ends included); a changed range is uploaded again. */
+static int vbo_refresh(VboEntry *e, uint32_t start, uint32_t end)
+{
+    uint32_t off = (start - e->lo) * e->stride, len = (end - start) * e->stride + e->esize;
+    const uint8_t *g = gptr(e->ptr + start * e->stride);
+    const uint8_t *h = e->shadow + off;
+    uint32_t words = len / 4u;
+    int same = 1;
+    for (uint32_t k = 0; k < 16u && same; k++) {
+        uint32_t w = words > 1u ? (uint32_t)((uint64_t)k * (words - 1u) / 15u) : 0u;
+        same = memcmp(g + 4u * w, h + 4u * w, 4) == 0;
+    }
+    if (same)
+        return 1;
+    if (++e->changes >= VBO_DYNAMIC_AFTER) {
+        e->dynamic = 1;   /* rewritten while played: drawn from client memory from now on */
+        return 0;
+    }
+    memcpy(e->shadow + off, g, len);
+    glBindBuffer(GL_ARRAY_BUFFER, e->buf);
+    glBufferSubData(GL_ARRAY_BUFFER, (GLintptr)off, (GLsizeiptr)len, e->shadow + off);
+    return 1;
+}
+
+/* Buffer holding the array's vertices start..end (one buffer per array: the
+ * union of the ranges drawn from it, so looking around does not multiply the
+ * copies), with *offset the byte offset of `start` in it; 0 when not cached
+ * (not in the hunk, too big, or found to be rewritten during play). */
+static GLuint vbo_block(uint32_t ptr, uint32_t st, uint32_t es, uint32_t start, uint32_t end, uint32_t *offset)
+{
+    if (!ptr || ptr < GUEST_HEAP_BASE || st < 4u || es < 4u)
+        return 0;
+    VboEntry *e = NULL, *victim = NULL;
+    for (uint32_t i = 0; i < VBO_SLOTS; i++) {
+        VboEntry *x = &vbo_cache[i];
+        if (x->buf && x->ptr == ptr && x->stride == st && x->esize == es) {
+            e = x;
+            break;
+        }
+        if (!victim || !x->buf || (victim->buf && x->last_use < victim->last_use))
+            victim = x;
+    }
+    if (e && e->dynamic)
+        return 0;
+    if (!e) {
+        if ((end - start) * st + es > VBO_MAX_BYTES)
+            return 0;
+        e = victim;
+        if (!e->buf)
+            glGenBuffers(1, &e->buf);
+        e->ptr = ptr;
+        e->stride = st;
+        e->esize = es;
+        e->lo = start;
+        e->hi = end;
+        e->changes = 0;
+        e->dynamic = 0;
+        if (!vbo_upload(e)) {
+            e->ptr = 0;
+            return 0;
+        }
+    } else if (start < e->lo || end > e->hi) {
+        uint32_t lo = start < e->lo ? start : e->lo, hi = end > e->hi ? end : e->hi;
+        if ((hi - lo) * st + es > VBO_MAX_BYTES)
+            return 0;
+        e->lo = lo;
+        e->hi = hi;
+        if (!vbo_upload(e))
+            return 0;
+    } else if (!vbo_refresh(e, start, end)) {
+        return 0;
+    }
+    e->last_use = vbo_frame;
+    *offset = (start - e->lo) * st;
+    return e->buf;
+}
+
 static void draw_stats_frame(void)
 {
     if (draw_stats <= 0)
@@ -538,85 +661,14 @@ static void draw_stats_frame(void)
                ds_normal / 100.0, ds_low / 100.0);
         for (unsigned i = 0; i < ds_nptrs; i++)
             rt_log("  %08X", ds_ptrs[i]);
+        for (unsigned i = 0; i < VBO_SLOTS; i++)
+            if (vbo_cache[i].buf)
+                rt_log("  vbo %08X stride %u elem %u verts %u..%u changes %u%s", vbo_cache[i].ptr, vbo_cache[i].stride,
+                       vbo_cache[i].esize, vbo_cache[i].lo, vbo_cache[i].hi, vbo_cache[i].changes,
+                       vbo_cache[i].dynamic ? " dynamic" : "");
         ds_draws = ds_range = ds_count = ds_bytes = ds_big = ds_vbo = ds_normal = ds_low = ds_idx_hunk = 0;
         ds_nptrs = 0;
     }
-}
-
-/* ---- static geometry in buffer objects ------------------------------------------
- * The world's vertex arrays live in the game's hunk and do not change while a
- * level is played, yet every frame drew ~17 MB of them, which vitaGL copies to
- * GPU memory per draw. Each (array, range) is put in a buffer object once and
- * reused; arrays inside the executable's image (the dynamic tess arrays) are not
- * cached. A cached range is checked against a sample of its bytes on every use
- * and uploaded again if they changed (a new level reuses the hunk). */
-
-typedef struct VboEntry {
-    uint32_t ptr, start, end, stride;   /* key */
-    GLuint buf;
-    uint32_t check[4];
-    uint32_t last_use;
-} VboEntry;
-
-#define VBO_SLOTS 4096u
-static VboEntry vbo_cache[VBO_SLOTS];
-static uint32_t vbo_frame;
-static int vbo_on = -1;
-
-static void vbo_sample(uint32_t a, uint32_t bytes, uint32_t *out)
-{
-    out[0] = RD32(a);
-    out[1] = RD32(a + (bytes / 3u & ~3u));
-    out[2] = RD32(a + (bytes * 2u / 3u & ~3u));
-    out[3] = RD32(a + bytes - 4u);
-}
-
-/* Buffer holding the array's vertices start..end, 0 when it is not cached. */
-static GLuint vbo_for(const ClientArray *a, uint32_t start, uint32_t end)
-{
-    if (!a->ptr || a->ptr < GUEST_HEAP_BASE)
-        return 0;
-    uint32_t st = array_stride(a);
-    uint32_t base = a->ptr + start * st, bytes = (end - start) * st + elem_size(a);
-    if (bytes < 4u)
-        return 0;
-    uint32_t h = (a->ptr * 2654435761u ^ start * 40503u ^ end * 2246822519u) & (VBO_SLOTS - 1u);
-    for (uint32_t probe = 0; probe < 8u; probe++) {
-        VboEntry *e = &vbo_cache[(h + probe) & (VBO_SLOTS - 1u)];
-        if (e->buf && e->ptr == a->ptr && e->start == start && e->end == end && e->stride == st) {
-            uint32_t now[4];
-            vbo_sample(base, bytes, now);
-            if (memcmp(now, e->check, sizeof(now)) != 0) {
-                glBindBuffer(GL_ARRAY_BUFFER, e->buf);
-                glBufferData(GL_ARRAY_BUFFER, (GLsizei)bytes, gptr(base), GL_STATIC_DRAW);
-                memcpy(e->check, now, sizeof(now));
-            }
-            e->last_use = vbo_frame;
-            return e->buf;
-        }
-    }
-    /* New entry: the first free slot, or the least recently used of the probed ones. */
-    VboEntry *victim = NULL;
-    for (uint32_t probe = 0; probe < 8u; probe++) {
-        VboEntry *e = &vbo_cache[(h + probe) & (VBO_SLOTS - 1u)];
-        if (!e->buf) {
-            victim = e;
-            break;
-        }
-        if (!victim || e->last_use < victim->last_use)
-            victim = e;
-    }
-    if (!victim->buf)
-        glGenBuffers(1, &victim->buf);
-    victim->ptr = a->ptr;
-    victim->start = start;
-    victim->end = end;
-    victim->stride = st;
-    victim->last_use = vbo_frame;
-    vbo_sample(base, bytes, victim->check);
-    glBindBuffer(GL_ARRAY_BUFFER, victim->buf);
-    glBufferData(GL_ARRAY_BUFFER, (GLsizei)bytes, gptr(base), GL_STATIC_DRAW);
-    return victim->buf;
 }
 
 /* Draws start..end with every hunk array from a buffer object; 0 if some array
@@ -637,43 +689,57 @@ static int draw_from_vbos(GLenum mode, uint32_t start, uint32_t end, GLsizei cou
         return 0;
     }
     ds_vbo++;
-    GLuint vb = vbo_for(&va_vertex, start, end);
-    if (!vb)
+    /* The draw's arrays are one interleaved block (the vertex array's stride, all
+     * within one stride of each other): the block goes into one buffer and every
+     * array of it points into that buffer; arrays outside the block stay client
+     * arrays. */
+    uint32_t st = array_stride(&va_vertex);
+    ClientArray *all[3 + MAX_TEXUNITS] = { &va_vertex, &va_color, &va_normal };
+    for (unsigned u = 0; u < MAX_TEXUNITS; u++)
+        all[3 + u] = &va_tex[u];
+    uint32_t lo = va_vertex.ptr, hi = va_vertex.ptr + elem_size(&va_vertex);
+    for (unsigned k = 1; k < 3 + MAX_TEXUNITS; k++) {
+        ClientArray *x = all[k];
+        if (x->ptr && array_stride(x) == st && x->ptr + st > va_vertex.ptr && x->ptr < va_vertex.ptr + st) {
+            if (x->ptr < lo)
+                lo = x->ptr;
+            if (x->ptr + elem_size(x) > hi)
+                hi = x->ptr + elem_size(x);
+        }
+    }
+    if (hi - lo > st)
         return 0;
-    glBindBuffer(GL_ARRAY_BUFFER, vb);
-    glVertexPointer(va_vertex.size, va_vertex.type, va_vertex.stride, (const void *)0);
-    if (va_color.ptr) {
-        GLuint cb = vbo_for(&va_color, start, end);
-        if (cb) {
-            glBindBuffer(GL_ARRAY_BUFFER, cb);
-            glColorPointer(va_color.size, va_color.type, va_color.stride, (const void *)0);
-        } else {
-            glBindBuffer(GL_ARRAY_BUFFER, 0);
-            set_color(&va_color, start * array_stride(&va_color));
-        }
+    uint32_t boff;
+    GLuint buf = vbo_block(lo, st, hi - lo, start, end, &boff);
+    if (!buf)
+        return 0;
+    int in_block[3 + MAX_TEXUNITS];
+    for (unsigned k = 0; k < 3 + MAX_TEXUNITS; k++) {
+        ClientArray *x = all[k];
+        in_block[k] = x->ptr && array_stride(x) == st && x->ptr >= lo && x->ptr + elem_size(x) <= hi;
     }
-    if (va_normal.ptr) {
-        GLuint nb = vbo_for(&va_normal, start, end);
-        if (nb) {
-            glBindBuffer(GL_ARRAY_BUFFER, nb);
-            glNormalPointer(va_normal.type, va_normal.stride, (const void *)0);
-        } else {
-            glBindBuffer(GL_ARRAY_BUFFER, 0);
-            set_normal(&va_normal, start * array_stride(&va_normal));
-        }
-    }
+    glBindBuffer(GL_ARRAY_BUFFER, buf);
+    glVertexPointer(va_vertex.size, va_vertex.type, va_vertex.stride, (const void *)(uintptr_t)(boff + va_vertex.ptr - lo));
+    if (in_block[1])
+        glColorPointer(va_color.size, va_color.type, va_color.stride, (const void *)(uintptr_t)(boff + va_color.ptr - lo));
+    if (in_block[2])
+        glNormalPointer(va_normal.type, va_normal.stride, (const void *)(uintptr_t)(boff + va_normal.ptr - lo));
     for (unsigned u = 0; u < MAX_TEXUNITS; u++) {
-        if (!va_tex[u].ptr)
+        if (!in_block[3 + u])
             continue;
         glClientActiveTexture(GL_TEXTURE0 + u);
-        GLuint tb = vbo_for(&va_tex[u], start, end);
-        if (tb) {
-            glBindBuffer(GL_ARRAY_BUFFER, tb);
-            glTexCoordPointer(va_tex[u].size, va_tex[u].type, va_tex[u].stride, (const void *)0);
-        } else {
-            glBindBuffer(GL_ARRAY_BUFFER, 0);
-            set_tex(&va_tex[u], start * array_stride(&va_tex[u]));
-        }
+        glTexCoordPointer(va_tex[u].size, va_tex[u].type, va_tex[u].stride, (const void *)(uintptr_t)(boff + va_tex[u].ptr - lo));
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    if (va_color.ptr && !in_block[1])
+        set_color(&va_color, start * array_stride(&va_color));
+    if (va_normal.ptr && !in_block[2])
+        set_normal(&va_normal, start * array_stride(&va_normal));
+    for (unsigned u = 0; u < MAX_TEXUNITS; u++) {
+        if (!va_tex[u].ptr || in_block[3 + u])
+            continue;
+        glClientActiveTexture(GL_TEXTURE0 + u);
+        set_tex(&va_tex[u], start * array_stride(&va_tex[u]));
     }
     glClientActiveTexture(GL_TEXTURE0 + va_client_unit);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
