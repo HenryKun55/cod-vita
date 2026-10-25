@@ -145,10 +145,13 @@ static void wgl_swap_buffers(Ctx *c)
     stdcall_ret(c, 1, 1);
 }
 
+/* Vsync stays on whatever the game asks (r_swapInterval 0 is its default): at
+ * hundreds of frames a second its movement code, which counts whole milliseconds,
+ * steps unevenly (crouching, view height). COD_VSYNC=0 turns it off. */
 static void wgl_swap_interval(Ctx *c)
 {
     const char *vs = getenv("COD_VSYNC");
-    SDL_GL_SetSwapInterval(vs && vs[0] == '0' ? 0 : (int)ARG(0));
+    SDL_GL_SetSwapInterval(vs && vs[0] == '0' ? 0 : 1);
     stdcall_ret(c, 1, 1);
 }
 
