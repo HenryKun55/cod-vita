@@ -60,7 +60,7 @@ void platform_push_key(uint8_t dik, int down);
 /* Key press/release as from a keyboard: DirectInput state + buffer and, for the
  * menu keys (Esc, Enter, arrows), the matching Win32 key messages. */
 void platform_key(uint8_t dik, int down);
-/* Feed FF_INPUT scripted events (testing aid); called from platform_pump. */
+/* Feed COD_INPUT scripted events (testing aid); called from platform_pump. */
 void platform_scripted_input(void);
 
 /* Mouse: accumulated relative motion since the last read, absolute position, buttons. */

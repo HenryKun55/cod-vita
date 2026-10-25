@@ -62,7 +62,7 @@ void platform_key(uint8_t dik, int down)
  * code K (hex), "diag=N" renderer diagnostic mode N, "shot=NAME" a screenshot of
  * the next frame named NAME (Vita: captured from the Vita3K window by
  * tools/qa_vita3k.sh), "dump=NAME" the executable's data section into NAME.bin
- * (finding game state by comparing dumps), "profreset" restart the profile (FF_PROFILE builds),
+ * (finding game state by comparing dumps), "profreset" restart the profile (COD_PROFILE builds),
  * "quit" end the process (the profile written first). */
 void platform_scripted_input(void)
 {
@@ -90,7 +90,7 @@ void platform_scripted_input(void)
     static int release_lmb;
     static Uint32 release_at;
     /* Nothing scripted (left): no clock query. Called on every message poll, at a
-     * rate that follows real time, so a query here would make FF_FAKE_CLOCK runs
+     * rate that follows real time, so a query here would make COD_FAKE_CLOCK runs
      * depend on real time (and costs a system call on the Vita). */
     if ((!script || !*script) && !release_dik && !release_lmb)
         return;
@@ -131,7 +131,7 @@ void platform_scripted_input(void)
         if (!strncmp(buf, "diag=", 5) || !strncmp(buf, "shot=", 5) || !strcmp(buf, "quit") ||
             !strcmp(buf, "profreset")) {
             if (buf[0] == 'p') {
-#ifdef FF_PROFILE
+#ifdef COD_PROFILE
                 rt_prof_reset(0);   /* measure from here (after loading) */
 #endif
             } else if (buf[0] == 'd')
@@ -140,7 +140,7 @@ void platform_scripted_input(void)
                 render_shot_request(buf + 5);
             else {
                 rt_log("[input] quit");
-#ifdef FF_PROFILE
+#ifdef COD_PROFILE
                 rt_prof_flush();
 #endif
                 platform_shutdown();

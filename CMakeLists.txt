@@ -64,7 +64,7 @@ set(COD_PROBES "" CACHE STRING "Guest functions to instrument with rt_probe")
 
 message(STATUS "Recompiling ${COD_DIR}")
 execute_process(
-    COMMAND ${CMAKE_COMMAND} -E env "FF_PROBES=${COD_PROBES}"
+    COMMAND ${CMAKE_COMMAND} -E env "COD_PROBES=${COD_PROBES}"
             "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/recomp/gen.py" "${GEN_DIR}" ${COD_MODULES}
     RESULT_VARIABLE GEN_RESULT
     OUTPUT_VARIABLE GEN_OUTPUT)
@@ -83,9 +83,13 @@ target_include_directories(cod_recomp PUBLIC runtime/include "${GEN_DIR}")
 set(COD_RECOMP_OPT "-O2" CACHE STRING "Optimization flag of the generated code")
 target_compile_options(cod_recomp PRIVATE -Wall -Wextra ${COD_RECOMP_OPT} -fwrapv -fno-strict-aliasing -fsigned-char
                        -Wno-unused-label -Wno-unused-variable -Wno-unused-but-set-variable)
+option(COD_X87_FLOAT "Single-precision x87 registers in generated code (faster on the Vita, inexact)" OFF)
+if(COD_X87_FLOAT)
+    target_compile_definitions(cod_recomp PRIVATE COD_X87_FLOAT)
+endif()
 option(COD_X87_CHECK "Check statically derived x87 stack effects at run time" OFF)
 if(COD_X87_CHECK)
-    target_compile_definitions(cod_recomp PRIVATE FF_X87_CHECK)
+    target_compile_definitions(cod_recomp PRIVATE COD_X87_CHECK)
 endif()
 
 file(GLOB RUNTIME_SOURCES CONFIGURE_DEPENDS runtime/src/*.c)
@@ -99,11 +103,11 @@ endif()
 add_executable(cod1 ${RUNTIME_SOURCES} ${SHIM_SOURCES})
 target_include_directories(cod1 PRIVATE runtime/include shim/include "${GEN_DIR}")
 target_compile_options(cod1 PRIVATE -Wall -Wextra -fwrapv -fno-strict-aliasing -fsigned-char)
-target_compile_definitions(cod1 PRIVATE COD_PORT_VERSION="${COD_PORT_VERSION}" FF_PORT_VERSION="${COD_PORT_VERSION}")
+target_compile_definitions(cod1 PRIVATE COD_PORT_VERSION="${COD_PORT_VERSION}" COD_PORT_VERSION="${COD_PORT_VERSION}")
 option(COD_PROFILE "Build with the sampling profiler" OFF)
 if(COD_PROFILE)
-    target_compile_definitions(cod_recomp PUBLIC FF_PROFILE)
-    target_compile_definitions(cod1 PRIVATE FF_PROFILE)
+    target_compile_definitions(cod_recomp PUBLIC COD_PROFILE)
+    target_compile_definitions(cod1 PRIVATE COD_PROFILE)
 endif()
 
 if(VITA)

@@ -4,8 +4,8 @@
  * (flush-to-zero for denormals, otherwise the IEEE results SSE gives). The MMX
  * registers are kept apart from the x87 stack they alias on a real CPU: the game
  * separates the two with EMMS, as it must. Included by recomp.h. */
-#ifndef FF_SIMD_H
-#define FF_SIMD_H
+#ifndef COD_SIMD_H
+#define COD_SIMD_H
 
 #include <math.h>
 #include <stdint.h>
@@ -13,7 +13,7 @@
 
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
 #include <arm_neon.h>
-#define FF_NEON 1
+#define COD_NEON 1
 #endif
 
 typedef union Xmm {
@@ -29,7 +29,7 @@ static inline Xmm rt_xload(const uint8_t *p)
     return v;
 }
 
-#if defined(FF_NEON)
+#if defined(COD_NEON)
 #define RT_PS_OP(name, neon, expr)                                                     \
     static inline void name(Xmm *d, const Xmm *s)                                      \
     {                                                                                  \

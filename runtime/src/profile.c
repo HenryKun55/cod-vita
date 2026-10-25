@@ -1,4 +1,4 @@
-/* Sampling profiler for the recompiled game (CMake option FF_PROFILE).
+/* Sampling profiler for the recompiled game (CMake option COD_PROFILE).
  *
  * Generated code publishes the id of the code that is running in rt_prof_cur (a
  * guest function address, the IAT slot of a host import, or a host thunk address
@@ -9,7 +9,7 @@
  *   - inclusive samples per guest function (on the shadow stack),
  *   - caller/callee pairs (which guest function the current code was called from),
  *   - call edges on the shadow stack (inclusive samples per caller -> callee: a call tree).
- * Results go to ux0:data/cod1/profile.txt (Vita) or ff_profile.txt (desktop) every
+ * Results go to ux0:data/cod1/profile.txt (Vita) or cod1_profile.txt (desktop) every
  * 10 seconds and at exit.
  *
  * Per-frame mode (rt_prof_reset(1)): samples wait in a buffer until the game thread
@@ -18,7 +18,7 @@
 
 typedef int profile_translation_unit_is_not_empty;
 
-#ifdef FF_PROFILE
+#ifdef COD_PROFILE
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,7 +30,7 @@ typedef int profile_translation_unit_is_not_empty;
 #else
 #include <pthread.h>
 #include <unistd.h>
-#define PROFILE_PATH "ff_profile.txt"
+#define PROFILE_PATH "cod1_profile.txt"
 #endif
 
 RtProf rt_prof_main;
@@ -226,17 +226,17 @@ static void dump_map(FILE *f, const Map *m, const char *title, int is_pair, uint
     }
 }
 
-#if defined(FF_CALLCOUNT) && defined(__ELF__)
+#if defined(COD_CALLCOUNT) && defined(__ELF__)
 /* The generated functions' counters (PROF_COUNT in recomp.h), bounds from the linker. */
-extern RtCallCount __start_ff_calls[], __stop_ff_calls[];
+extern RtCallCount __start_cod_calls[], __stop_cod_calls[];
 #if defined(__vita__)
 #define CALLS_PATH "ux0:data/cod1/calls.txt"
 #else
-#define CALLS_PATH "ff_calls.txt"
+#define CALLS_PATH "cod_calls.txt"
 #endif
 static void calls_reset(void)
 {
-    for (RtCallCount *p = __start_ff_calls; p < __stop_ff_calls; p++)
+    for (RtCallCount *p = __start_cod_calls; p < __stop_cod_calls; p++)
         p->n = 0;
 }
 /* "address count" of every function called since the last reset (tools/recomp/hot.py). */
@@ -245,7 +245,7 @@ static void calls_dump(void)
     FILE *f = fopen(CALLS_PATH, "w");
     if (!f)
         return;
-    for (const RtCallCount *p = __start_ff_calls; p < __stop_ff_calls; p++)
+    for (const RtCallCount *p = __start_cod_calls; p < __stop_cod_calls; p++)
         if (p->n)
             fprintf(f, "%08X %u\n", p->addr, p->n);
     fclose(f);

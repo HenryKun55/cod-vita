@@ -1,4 +1,4 @@
-/* msvcrt.dll: the Microsoft C runtime Freedom.Exe imports.
+/* msvcrt.dll: the Microsoft C runtime CoDSP.exe imports.
  *
  * Every function is cdecl (the caller pops the arguments) unless noted. Strings
  * and buffers are guest memory; FILE objects are guest structures (the game only
@@ -55,7 +55,7 @@ static void msvcrt_init_data(void)
     host_files[1] = stdout;
     host_files[2] = stderr;
     acmdln_var = scratch_alloc(4, 4);
-    WR32(acmdln_var, scratch_strdup("Freedom.Exe"));
+    WR32(acmdln_var, scratch_strdup("CoDSP.exe"));
     fmode_var = scratch_alloc(4, 4);
     commode_var = scratch_alloc(4, 4);
     adjust_fdiv_var = scratch_alloc(4, 4);
@@ -109,7 +109,7 @@ SHIM(msvcrt, __p__commode) { msvcrt_init_data(); cdecl_ret(c, commode_var); }
 SHIM(msvcrt, __getmainargs)
 {
     uint32_t argv = scratch_alloc(8, 4);
-    WR32(argv, scratch_strdup("Freedom.Exe"));
+    WR32(argv, scratch_strdup("CoDSP.exe"));
     uint32_t envp = scratch_alloc(4, 4);
     WR32(ARG(0), 1);
     WR32(ARG(1), argv);

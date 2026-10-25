@@ -87,7 +87,7 @@ PATCHES = {
 
 # Game functions with hand-decompiled native versions (runtime/src/native_*.c): entry ->
 # (host function, [(address, size, SHA-1)] of every piece of guest code the native
-# version reproduces). Emitted only when all the bytes match; FF_NATIVE=0 at
+# version reproduces). Emitted only when all the bytes match; COD_NATIVE=0 at
 # configure time leaves the hooks out.
 NATIVE = {}
 
@@ -1863,7 +1863,7 @@ class FuncGen:
             self.rd(ins.ops[0], 4), ret, INDIRECT_CACHE, INDIRECT_CALL)]
 
     def import_call(self, ins, imp):
-        """Call of a host import; under FF_PROFILE the profiler attributes the time to
+        """Call of a host import; under COD_PROFILE the profiler attributes the time to
         the import (identified by its IAT slot)."""
         slot = ins.ops[0].mem.disp & 0xFFFFFFFF
         return 'PROF_HOST(%s); %s(c); PROF_BACK(%s);' % (h(slot), self.g.import_fn(imp), h(self.fn.entry))
@@ -2088,17 +2088,17 @@ class Generator:
         self.func_set = set(self.funcs)
         self.tick_mem, self.tick_imm = {}, {}
         # Entry hooks: game-specific fixes (runtime/src/igi_fixes.c) plus diagnostic probes.
-        self.probes = set(GAME_HOOKS) | {int(x, 16) for x in os.environ.get('FF_PROBES', '').replace(',', ' ').split()}
+        self.probes = set(GAME_HOOKS) | {int(x, 16) for x in os.environ.get('COD_PROBES', '').replace(',', ' ').split()}
         self.imports_used = {}
         self._x87 = {}
         self._x87_gen = None
-        # FF_X87_DYNAMIC=1 disables the static x87 stack allocation (for A/B checks).
-        self.x87_force_dynamic = os.environ.get('FF_X87_DYNAMIC') == '1'
+        # COD_X87_DYNAMIC=1 disables the static x87 stack allocation (for A/B checks).
+        self.x87_force_dynamic = os.environ.get('COD_X87_DYNAMIC') == '1'
         self.fsumm = {}
         self.fproven = {}
         self.hle = {}
-        # FF_HLE=0 keeps the guest code for every C runtime routine (for A/B checks).
-        for a, (name, size, digest) in (HLE.items() if os.environ.get('FF_HLE') != '0' else ()):
+        # COD_HLE=0 keeps the guest code for every C runtime routine (for A/B checks).
+        for a, (name, size, digest) in (HLE.items() if os.environ.get('COD_HLE') != '0' else ()):
             if a in self.funcs and hashlib.sha1(self.an.pe.read(a, size)).hexdigest() == digest:
                 self.hle[a] = name
             else:
@@ -2108,13 +2108,13 @@ class Generator:
                 self.hle[a] = name
             else:
                 print('warning: %08X does not match %s; running the guest code' % (a, name))
-        for a, (name, pieces) in (NATIVE.items() if os.environ.get('FF_NATIVE') != '0' else ()):
+        for a, (name, pieces) in (NATIVE.items() if os.environ.get('COD_NATIVE') != '0' else ()):
             if a in self.funcs and all(hashlib.sha1(self.an.pe.read(p, n)).hexdigest() == d for p, n, d in pieces):
                 self.hle[a] = name
             else:
                 print('warning: %08X does not match %s; running the guest code' % (a, name))
         self.block_hooks = {}
-        for a, (name, cont, pieces) in (BLOCK_HOOKS.items() if os.environ.get('FF_NATIVE') != '0' else ()):
+        for a, (name, cont, pieces) in (BLOCK_HOOKS.items() if os.environ.get('COD_NATIVE') != '0' else ()):
             if all(hashlib.sha1(self.an.pe.read(p, n)).hexdigest() == d for p, n, d in pieces):
                 self.block_hooks[a] = (name, cont)
             else:
@@ -2258,12 +2258,12 @@ class Generator:
 
     def wrap(self, entry, body, fg):
         if entry in self.probes:
-            # Diagnostic probe requested at configure time (FF_PROBES).
+            # Diagnostic probe requested at configure time (COD_PROBES).
             body = ['    c->r[0] = eax; c->r[1] = ecx; c->r[4] = esp; rt_probe(c, 0x%08Xu);' % entry] + body
         hle = self.hle.get(entry)
         if hle:
             body = ['    { uint64_t hr; if (%s(c, esp, ecx, eax, &hr)) { return hr; } }' % hle] + body
-        # Profiler hooks (empty unless FF_PROFILE): every exit restores the caller.
+        # Profiler hooks (empty unless COD_PROFILE): every exit restores the caller.
         body = [re.sub(r'\breturn\b', 'PROF_EXIT; return', line) for line in body]
         text = '\n'.join(body)
         out = [FUNC_PROTO % entry, '{'] + self.prologue(text, fg) + ['    PROF_ENTER(%s);' % h(entry), text, '}\n\n']

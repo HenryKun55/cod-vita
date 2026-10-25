@@ -100,7 +100,7 @@ static uint32_t thunk_count;
 
 /* Call thunk `i` with eax, ecx and esp already stored in the context (what
  * rt_dispatch does for a thunk address, without the range check and lookup). */
-/* FF_LOG_CALLS=T: log every host call (imports, COM methods) from T seconds
+/* COD_LOG_CALLS=T: log every host call (imports, COM methods) from T seconds
  * after start for 100 ms (diagnostics). */
 static double log_calls_at = -1.0;
 
@@ -111,13 +111,13 @@ static uint64_t thunk_run(Ctx *c, uint32_t i)
     const uint32_t target = THUNK_BASE + i * THUNK_STRIDE;
     if (log_calls_at >= 0.0)
         log_call(i);
-#ifdef FF_PROFILE
+#ifdef COD_PROFILE
     uint32_t prof_prev = c->prof->cur;
     c->prof->cur = target;
 #endif
     g_current_thunk = target;
     thunk_fns[i](c);
-#ifdef FF_PROFILE
+#ifdef COD_PROFILE
     c->prof->cur = prof_prev;
 #endif
     return ((uint64_t)c->r[4] << 32) | c->r[0];
@@ -179,7 +179,7 @@ uint32_t thunk_register_unique(GuestFn fn, const char *name)
 
 void thunk_set_fast(GuestFn fn, GuestFastFn fast)
 {
-#ifndef FF_PROFILE
+#ifndef COD_PROFILE
     for (uint32_t i = 0; i < thunk_count && i < THUNK_FAST_MAX; i++)
         if (thunk_fns[i] == fn)
             thunk_entries[i].fast = fast;
@@ -256,7 +256,7 @@ static void log_call(uint32_t i)
         rt_log("call %s", thunk_names[i]);
 }
 
-/* Diagnostic entry probes (FF_PROBES at configure time): log the call. */
+/* Diagnostic entry probes (COD_PROBES at configure time): log the call. */
 /* COD_SELFTEST: at the first call of the file name hash (CoDSP.exe 0x421980,
  * eax = name, [esp+4] = table size), hash a few names and log the results
  * (comparing hosts). */
@@ -388,11 +388,11 @@ int main(int argc, char **argv)
     rt_log("loaded %s, entry %08X, %u functions, %u imports", g_guest_modules[0].name, entry, g_guest_func_count,
            g_guest_import_count);
 
-#ifdef FF_PROFILE
+#ifdef COD_PROFILE
     rt_prof_start();
 #endif
     Ctx *c = &g_ctx;
-#ifdef FF_PROFILE
+#ifdef COD_PROFILE
     c->prof = &rt_prof_main;
 #endif
     rt_fninit(c);

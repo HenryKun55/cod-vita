@@ -4,7 +4,7 @@
 Total = the generated functions (dispatch_table.c of a build), each sized up to the
 next function's start. Native = the guest code the NATIVE and BLOCK_HOOKS tables of
 gen.py reproduce (their pieces' sizes). With call counts (calls.txt of an
-FF_CALLCOUNT build, see runtime/src/profile.c) it also gives the share of calls that
+COD_CALLCOUNT build, see runtime/src/profile.c) it also gives the share of calls that
 enter a native function, and lists the hottest functions still recompiled.
 
 usage: tools/recomp/status.py [--gen build-vita/gen] [--calls calls.txt ...]

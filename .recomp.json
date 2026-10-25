@@ -1,21 +1,21 @@
 {
   "$schema": "https://recomp.fyi/schema/v1.json",
-  "game": "Freedom Fighters",
+  "game": "Call of Duty",
   "system": "PC (Windows)",
   "type": "recomp",
-  "project": "ff-vita",
+  "project": "cod-vita",
   "status": "in-progress",
   "targets": [
     "PS Vita",
     "macOS"
   ],
   "toolchain": "Custom x86 recompiler",
-  "approach": "Static recompilation of the game's x86 code (Freedom.Exe, 2003) to C with a project-specific recompiler, Windows / Direct3D 8 / DirectSound / DirectInput reimplemented as host code (OpenGL ES through vitaGL on PS Vita), and the hot game code decompiled into verified native C",
-  "notes": "Runs on PS Vita and macOS through static recompilation; no emulator runs the game's CPU code. Hot functions (lighting, skinning, collision, culling, scene transforms) are decompiled with Ghidra and rewritten as native C, each checked against the recompiled code on the same state (native_check). Plan and progress in docs/NATIVE_PLAN.md.",
+  "approach": "Static recompilation of the single-player game's x86 code (CoDSP.exe and its game, cgame and ui DLLs, 2003) to C with a project-specific recompiler, Windows / OpenGL / Miles Sound System reimplemented as host code (OpenGL ES through vitaGL on PS Vita)",
+  "notes": "Runs on macOS and on PS Vita (Vita3K) through static recompilation; no emulator runs the game's CPU code. The engine executable and the three game DLLs it loads at run time are recompiled together, the DLLs rebased into one 32-bit guest space; the renderer's OpenGL calls go straight to the host driver, and Miles Sound System 6.5 is reimplemented on SDL.",
   "tags": [
     "vita",
-    "direct3d8",
-    "decompilation"
+    "opengl",
+    "id-tech-3"
   ],
   "maintainers": [
     {

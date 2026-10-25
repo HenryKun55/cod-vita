@@ -8,7 +8,7 @@ cold neighbour costs instruction cache and TLB misses. This writes a linker
 section ordering file (ld --section-ordering-file, see CMakeLists.txt) that puts the
 functions called at least --min times first, hottest first.
 
-Input: calls.txt dumps of an FF_CALLCOUNT build (runtime/src/profile.c), one per
+Input: calls.txt dumps of an COD_CALLCOUNT build (runtime/src/profile.c), one per
 scene; a function's count is its largest over the dumps.
 
 usage: tools/recomp/hot.py --min 1000 calls_bedroom.txt calls_street.txt ...

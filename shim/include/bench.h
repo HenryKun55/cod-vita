@@ -1,6 +1,6 @@
 /* Benchmark hooks of the renderer and the shims (no benchmark driver yet). */
-#ifndef FF_BENCH_H
-#define FF_BENCH_H
+#ifndef COD_BENCH_H
+#define COD_BENCH_H
 
 #include <stdint.h>
 

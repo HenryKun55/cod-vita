@@ -1,4 +1,4 @@
-/* kernel32.dll: the APIs Freedom.Exe uses beyond kernel32.c's set (file mappings, atoms,
+/* kernel32.dll: the APIs the game uses beyond kernel32.c's set (file mappings, atoms,
  * directories, file time conversions, messages). */
 #include "shim.h"
 

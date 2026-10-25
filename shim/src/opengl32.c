@@ -9,6 +9,9 @@
 #include "platform.h"
 
 #include <stdio.h>
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#endif
 #include <stdlib.h>
 #include <strings.h>
 
@@ -92,7 +95,7 @@ void glm_glReadPixels(Ctx *c)
 
 /* ---- textures ---------------------------------------------------------------
  * The Vita gets no compressed textures: compressed uploads to vitaGL corrupted
- * memory while a level loaded (the Freedom Fighters port saw the same). DXT
+ * memory while a level loaded (as in the author's Freedom Fighters port). DXT
  * images are decoded to RGBA here, and a compressed internal format asked of
  * glTexImage2D becomes the plain one. Elsewhere the driver takes them as they are. */
 
@@ -484,9 +487,42 @@ static int draw_compacted(GLenum mode, GLuint start, GLuint end, GLsizei count, 
     return 1;
 }
 
+/* out[i] = in[i] - start, from 16- or 32-bit indices (the game's ~110k per frame). */
+static void rebase_indices(uint16_t *out, const uint8_t *in, uint32_t n, int in32, uint32_t start)
+{
+    uint32_t i = 0;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    if (in32) {
+        uint32x4_t s = vdupq_n_u32(start);
+        for (; i + 8u <= n; i += 8u) {
+            uint32x4_t a = vsubq_u32(vld1q_u32((const uint32_t *)(const void *)(in + 4u * i)), s);
+            uint32x4_t b = vsubq_u32(vld1q_u32((const uint32_t *)(const void *)(in + 4u * i + 16u)), s);
+            vst1q_u16(out + i, vcombine_u16(vmovn_u32(a), vmovn_u32(b)));
+        }
+    } else {
+        uint16x8_t s = vdupq_n_u16((uint16_t)start);
+        for (; i + 8u <= n; i += 8u)
+            vst1q_u16(out + i, vsubq_u16(vld1q_u16((const uint16_t *)(const void *)(in + 2u * i)), s));
+    }
+#endif
+    if (in32) {
+        for (; i < n; i++) {
+            uint32_t v;
+            memcpy(&v, in + 4u * i, 4);
+            out[i] = (uint16_t)(v - start);
+        }
+    } else {
+        for (; i < n; i++) {
+            uint16_t v;
+            memcpy(&v, in + 2u * i, 2);
+            out[i] = (uint16_t)(v - start);
+        }
+    }
+}
+
 /* COD_DRAW_STATS: per-frame totals of the ranged draws (logged every 100 frames). */
 static int draw_stats = -1;
-static uint64_t ds_draws, ds_range, ds_count, ds_bytes, ds_big, ds_vbo, ds_normal, ds_low;
+static uint64_t ds_draws, ds_range, ds_count, ds_bytes, ds_big, ds_vbo, ds_normal, ds_low, ds_idx_hunk;
 static uint32_t ds_frames;
 static uint32_t ds_ptrs[16];
 static unsigned ds_nptrs;
@@ -497,12 +533,12 @@ static void draw_stats_frame(void)
         return;
     if (++ds_frames % 100u == 0) {
         rt_log("draws/frame %.0f, range verts/frame %.0f, indices/frame %.0f, array bytes/frame %.0f KB, "
-               "draws with range > 4x indices %.0f, from buffer objects %.0f (not: normals %.0f, image arrays %.0f); vertex arrays at:",
-               ds_draws / 100.0, ds_range / 100.0, ds_count / 100.0, ds_bytes / 102400.0, ds_big / 100.0, ds_vbo / 100.0,
+               "index arrays in the hunk %.0f, draws with range > 4x indices %.0f, from buffer objects %.0f (not: normals %.0f, image arrays %.0f); vertex arrays at:",
+               ds_draws / 100.0, ds_range / 100.0, ds_count / 100.0, ds_bytes / 102400.0, ds_idx_hunk / 100.0, ds_big / 100.0, ds_vbo / 100.0,
                ds_normal / 100.0, ds_low / 100.0);
         for (unsigned i = 0; i < ds_nptrs; i++)
             rt_log("  %08X", ds_ptrs[i]);
-        ds_draws = ds_range = ds_count = ds_bytes = ds_big = ds_vbo = ds_normal = ds_low = 0;
+        ds_draws = ds_range = ds_count = ds_bytes = ds_big = ds_vbo = ds_normal = ds_low = ds_idx_hunk = 0;
         ds_nptrs = 0;
     }
 }
@@ -660,6 +696,7 @@ static void draw_range(Ctx *c)
         ds_range += r;
         ds_count += (uint32_t)count;
         ds_big += r > 4u * (uint32_t)count;
+        ds_idx_hunk += idx >= GUEST_HEAP_BASE;
         uint32_t per = (va_vertex.ptr ? array_stride(&va_vertex) : 0) + (va_color.ptr ? array_stride(&va_color) : 0);
         for (unsigned u = 0; u < MAX_TEXUNITS; u++)
             per += va_tex[u].ptr ? array_stride(&va_tex[u]) : 0;
@@ -689,10 +726,7 @@ static void draw_range(Ctx *c)
     }
     int fits16 = end - start < 65536u;
     if (fits16 && tmp16) {
-        for (GLsizei i = 0; i < count; i++) {
-            uint32_t v = type == GL_UNSIGNED_SHORT ? RD16(idx + 2u * (uint32_t)i) : RD32(idx + 4u * (uint32_t)i);
-            tmp16[i] = (uint16_t)(v - start);
-        }
+        rebase_indices(tmp16, g_mem + idx, (uint32_t)count, type == GL_UNSIGNED_INT, start);
         if (!draw_from_vbos(mode, start, end, count, tmp16)) {
             shift_arrays(start);
             glDrawRangeElements(mode, 0, end - start, count, GL_UNSIGNED_SHORT, tmp16);

@@ -420,7 +420,7 @@ SHIM(gdi32, GetDeviceCaps)
 SHIM(gdi32, CreateICA) { stdcall_ret(c, HDC_FAKE, 4); }
 SHIM(gdi32, DeleteDC) { stdcall_ret(c, 1, 1); }
 
-/* ---- Freedom Fighters additions ---------------------------------------------- */
+/* ---- more user32 / gdi32 ------------------------------------------------------ */
 
 SHIM(user32, RegisterClassExA)
 {

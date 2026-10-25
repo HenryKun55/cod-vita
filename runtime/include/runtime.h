@@ -59,7 +59,7 @@ GuestFn thunk_lookup(uint32_t addr);
  * indirect call caches, or NULL when it has none. */
 const GuestFunc *thunk_entry(uint32_t addr);
 const char *thunk_name(uint32_t addr);
-/* FF_LOG_CALLS diagnostics: log a host call made through a thunk address. */
+/* COD_LOG_CALLS diagnostics: log a host call made through a thunk address. */
 void rt_log_thunk_call(uint32_t addr);
 
 /* Call guest code from the host (stdcall or cdecl; stack is restored either way). */

@@ -368,14 +368,14 @@ void rt_dispatch(Ctx *c, uint32_t target)
     if (target >= THUNK_BASE && target < THUNK_BASE + THUNK_MAX * THUNK_STRIDE) {
         fn = thunk_lookup(target);
         if (fn) {
-#ifdef FF_PROFILE
+#ifdef COD_PROFILE
             uint32_t prof_prev = c->prof->cur;
             c->prof->cur = target;
 #endif
             g_current_thunk = target;
             rt_log_thunk_call(target);
             fn(c);
-#ifdef FF_PROFILE
+#ifdef COD_PROFILE
             c->prof->cur = prof_prev;
 #endif
             return;
@@ -392,7 +392,7 @@ void rt_dispatch(Ctx *c, uint32_t target)
     rt_fatal(c, "dispatch to unknown address %08X (return address %08X)", target, RD32(c->r[4]));
 }
 
-/* Reached only from code generated with FF_X87_CHECK. */
+/* Reached only from code generated with COD_X87_CHECK. */
 void rt_x87_mismatch(Ctx *c, uint32_t addr, uint32_t expect)
 {
     rt_fatal(c, "x87 stack top %u after the call at %08X, expected %u", c->ftop, addr, expect);

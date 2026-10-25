@@ -27,7 +27,7 @@ typedef struct Ctx {
     uint32_t ftop;
     uint32_t fcw;
     uint32_t fsw;           /* condition codes C0-C3 and exception bits; TOP is composed on read */
-    struct RtProf *prof;    /* profiler state of this guest thread (FF_PROFILE builds) */
+    struct RtProf *prof;    /* profiler state of this guest thread (COD_PROFILE builds) */
     Xmm xmm[8];             /* SSE registers (simd.h) */
     uint64_t mm[8];         /* MMX registers */
 } Ctx;
@@ -80,8 +80,8 @@ static inline void WRF64(uint32_t a, double v) { memcpy(g_mem + a, &v, 8); }
 /* Accessors used by the generated code. Every generated function copies g_mem into
  * the local `gm`: a store through a uint8_t pointer may alias any object, so a
  * global base would be reloaded after every guest store. */
-#if defined(FF_WATCH)
-/* Diagnostic build (FF_WATCH, with FF_PROFILE): the generated code's stores into
+#if defined(COD_WATCH)
+/* Diagnostic build (COD_WATCH, with COD_PROFILE): the generated code's stores into
  * [rt_watch_lo, rt_watch_hi) are reported with the guest function doing them. */
 extern uint8_t *volatile rt_watch_lo, *volatile rt_watch_hi;
 void rt_watch_hit(const uint8_t *p, const void *v, unsigned n);
@@ -155,7 +155,7 @@ static inline void fpop(Ctx *c) { c->ftop = (c->ftop + 1u) & 7u; }
 
 /* Type of the x87 registers the generated code keeps in locals.
  *
- * FF_X87_FLOAT (off by default) makes them single precision. On the Cortex-A9
+ * COD_X87_FLOAT (off by default) makes them single precision. On the Cortex-A9
  * that avoids the float<->double conversions on every load and store and makes
  * multiplies, divides and square roots cheaper, but it is not exact: results
  * differ from an x87 running with 53- or 64-bit precision control, and the
@@ -163,7 +163,7 @@ static inline void fpop(Ctx *c) { c->ftop = (c->ftop + 1u) & 7u; }
  * to hardware only while the game runs with 24-bit precision control (Direct3D
  * sets that unless FPU_PRESERVE is used), and even then the exponent range and
  * double rounding differ. The context copy (Ctx.st) stays double either way. */
-#ifdef FF_X87_FLOAT
+#ifdef COD_X87_FLOAT
 typedef float x87_t;
 static inline x87_t rt_fsqrt(x87_t v) { return sqrtf(v); }
 #else
@@ -214,10 +214,10 @@ static inline int64_t rt_ftol64(double v)
     return (int64_t)v;
 }
 
-/* Define FF_X87_CHECK to verify the statically derived x87 stack effect of every
+/* Define COD_X87_CHECK to verify the statically derived x87 stack effect of every
  * call whose effect the generator considers proven. */
 void rt_x87_mismatch(Ctx *c, uint32_t addr, uint32_t expect);
-#ifdef FF_X87_CHECK
+#ifdef COD_X87_CHECK
 #define X87_CHECK(expect, addr) do { if (c->ftop != (expect)) rt_x87_mismatch(c, (addr), (expect)); } while (0)
 #else
 #define X87_CHECK(expect, addr) ((void)0)
@@ -529,11 +529,11 @@ void rt_cpuid(Ctx *c);
 uint64_t rt_rdtsc(void);
 
 /* ---- profiler ------------------------------------------------------------
- * With FF_PROFILE, generated functions keep a shadow call stack and the id of
+ * With COD_PROFILE, generated functions keep a shadow call stack and the id of
  * the code currently running (a guest function address, an import's IAT slot,
  * or a host thunk address) that a sampling thread reads (runtime/src/profile.c).
  * Without it every hook compiles to nothing. */
-#ifdef FF_PROFILE
+#ifdef COD_PROFILE
 #define RT_PROF_MAX 256u
 /* Per guest thread (Ctx.prof): the sampler reads the main thread's, rt_prof_main;
  * the other guest threads (sound, file loading) keep their own, not sampled. */
@@ -545,15 +545,15 @@ typedef struct RtProf {
 extern RtProf rt_prof_main;
 /* Host code without a guest context (the renderer's sections) bills the main thread. */
 #define rt_prof_cur (rt_prof_main.cur)
-/* Call counts (FF_CALLCOUNT, with FF_PROFILE): one counter per generated function in
- * section ff_calls, written next to the profile (calls.txt) and reset with it. They
+/* Call counts (COD_CALLCOUNT, with COD_PROFILE): one counter per generated function in
+ * section cod_calls, written next to the profile (calls.txt) and reset with it. They
  * pick the hot set the code layout and the native work go after. */
-#ifdef FF_CALLCOUNT
+#ifdef COD_CALLCOUNT
 typedef struct RtCallCount {
     uint32_t addr, n;
 } RtCallCount;
 #define PROF_COUNT(a)                                                                      \
-    static RtCallCount prof_cc __attribute__((section("ff_calls"), used, aligned(8))) = {(a), 0}; \
+    static RtCallCount prof_cc __attribute__((section("cod_calls"), used, aligned(8))) = {(a), 0}; \
     prof_cc.n++
 #else
 #define PROF_COUNT(a) ((void)0)
@@ -623,7 +623,7 @@ uint64_t rt_call_indirect_ic(Ctx *c, uint32_t target, uint32_t esp, uint32_t ecx
                              const GuestFunc **ic);
 
 void rt_unimplemented(Ctx *c, uint32_t addr, const char *what);
-/* Diagnostic hook inserted at the entry of functions listed in FF_PROBES. */
+/* Diagnostic hook inserted at the entry of functions listed in COD_PROBES. */
 void rt_probe(Ctx *c, uint32_t func);
 void rt_divide_error(Ctx *c, uint32_t addr);
 void rt_noreturn(Ctx *c, uint32_t addr);

@@ -123,7 +123,7 @@ SHIM(kernel32, CreateThread)
     if (!t->stack)
         rt_fatal(c, "CreateThread: no memory for the guest stack");
     rt_fninit(&t->ctx);
-#ifdef FF_PROFILE
+#ifdef COD_PROFILE
     t->ctx.prof = calloc(1, sizeof(RtProf));   /* not sampled: the profile is the main thread's */
 #endif
     t->ctx.fcw = c->fcw;

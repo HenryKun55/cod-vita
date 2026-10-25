@@ -139,7 +139,7 @@ void platform_set_video_mode(int w, int h)
     mode_h = h;
 }
 
-#ifdef FF_PROFILE
+#ifdef COD_PROFILE
 /* Phase markers inside the private vitaGL (VGL_PROF_HOOKS): written where the
  * profiler reads the running code's id. */
 extern volatile uint32_t *vgl_prof_slot __attribute__((weak));
@@ -149,7 +149,7 @@ extern uint32_t vgl_prof_base __attribute__((weak));
 /* On the game thread, which makes every GL call. */
 void platform_gl_init(void)
 {
-#ifdef FF_PROFILE
+#ifdef COD_PROFILE
     if (&vgl_prof_slot && &vgl_prof_base) {
         vgl_prof_base = PROF_H_VGL;
         vgl_prof_slot = &rt_prof_main.cur;
@@ -209,7 +209,7 @@ void platform_swap(void)
  * controls; pad_input.c turns each into the key or mouse input of its action's
  * default PC binding (the layout is listed there).
  *
- * ff.cfg: front_touch=0 / rear_touch=0 turn a touch panel off;
+ * cod1.cfg: front_touch=0 / rear_touch=0 turn a touch panel off;
  * stick_sensitivity=<multiplier> scales the right stick in gameplay (default 1.0;
  * the menu cursor speed is fixed). */
 
@@ -275,7 +275,7 @@ static void mouse_motion(int32_t mx, int32_t my)
 static int front_touch_on = 1, rear_touch_on = 1, aspect_keep;
 static int rear_mid_y = 544;     /* rear panel: above = zoom in, below = zoom out */
 static int front_w = 1920, front_h = 1088;
-static float stick_sensitivity = 1.0f;   /* ff.cfg stick_sensitivity= */
+static float stick_sensitivity = 1.0f;   /* cod1.cfg stick_sensitivity= */
 
 static void touch_init(void)
 {
