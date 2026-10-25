@@ -77,6 +77,8 @@ static int out_rate = 44100;
 static uint32_t driver_handle;
 static uint32_t file_cb[4];       /* open, close, seek, read (guest, stdcall) */
 static float listener_scale = 1.0f;
+static int mss_debug = -1;
+#define MSSLOG(...) do { if (mss_debug < 0) mss_debug = getenv("COD_MSS_DEBUG") != NULL; if (mss_debug) rt_log(__VA_ARGS__); } while (0)
 
 static Voice *voice_of(uint32_t h)
 {
@@ -479,6 +481,7 @@ SHIM(mss32, _AIL_allocate_sample_handle_4)
 
 SHIM(mss32, _AIL_release_sample_handle_4)
 {
+    MSSLOG("_AIL_release_sample_handle_4(%08X %08X %08X)", ARG(0), ARG(1), ARG(2));
     SDL_LockMutex(lock);
     Voice *v = voice_of(ARG(0));
     if (v) {
@@ -491,6 +494,7 @@ SHIM(mss32, _AIL_release_sample_handle_4)
 
 SHIM(mss32, _AIL_init_sample_4)
 {
+    MSSLOG("_AIL_init_sample_4(%08X %08X %08X)", ARG(0), ARG(1), ARG(2));
     SDL_LockMutex(lock);
     Voice *v = voice_of(ARG(0));
     if (v) {
@@ -516,6 +520,7 @@ SHIM(mss32, _AIL_init_sample_4)
 /* AIL_set_sample_type(s, format, flags) */
 SHIM(mss32, _AIL_set_sample_type_12)
 {
+    MSSLOG("_AIL_set_sample_type_12(%08X %08X %08X)", ARG(0), ARG(1), ARG(2));
     SDL_LockMutex(lock);
     Voice *v = voice_of(ARG(0));
     if (v) {
@@ -551,6 +556,7 @@ static void set_source(Voice *v, uint32_t data, uint32_t len)
 
 SHIM(mss32, _AIL_set_sample_address_12)
 {
+    MSSLOG("_AIL_set_sample_address_12(%08X %08X %08X)", ARG(0), ARG(1), ARG(2));
     SDL_LockMutex(lock);
     Voice *v = voice_of(ARG(0));
     if (v)
@@ -561,6 +567,7 @@ SHIM(mss32, _AIL_set_sample_address_12)
 
 SHIM(mss32, _AIL_set_sample_playback_rate_8)
 {
+    MSSLOG("_AIL_set_sample_playback_rate_8(%08X %08X %08X)", ARG(0), ARG(1), ARG(2));
     Voice *v = voice_of(ARG(0));
     if (v)
         v->rate = ARG(1);
@@ -628,6 +635,7 @@ static void start(Voice *v)
 
 SHIM(mss32, _AIL_start_sample_4)
 {
+    MSSLOG("_AIL_start_sample_4(%08X %08X %08X)", ARG(0), ARG(1), ARG(2));
     SDL_LockMutex(lock);
     Voice *v = voice_of(ARG(0));
     if (v)
@@ -645,13 +653,27 @@ static void set_status(uint32_t h, uint32_t from_mask, uint32_t to)
     SDL_UnlockMutex(lock);
 }
 
-SHIM(mss32, _AIL_stop_sample_4) { set_status(ARG(0), SMP_PLAYING, SMP_STOPPED); stdcall_ret(c, 0, 1); }
-SHIM(mss32, _AIL_resume_sample_4) { set_status(ARG(0), SMP_STOPPED, SMP_PLAYING); stdcall_ret(c, 0, 1); }
-SHIM(mss32, _AIL_end_sample_4) { set_status(ARG(0), SMP_PLAYING | SMP_STOPPED, SMP_DONE); stdcall_ret(c, 0, 1); }
+SHIM(mss32, _AIL_stop_sample_4)
+{
+    MSSLOG("_AIL_stop_sample_4(%08X %08X %08X)", ARG(0), ARG(1), ARG(2));
+    set_status(ARG(0), SMP_PLAYING, SMP_STOPPED); stdcall_ret(c, 0, 1); 
+}
+SHIM(mss32, _AIL_resume_sample_4)
+{
+    MSSLOG("_AIL_resume_sample_4(%08X %08X %08X)", ARG(0), ARG(1), ARG(2));
+    set_status(ARG(0), SMP_STOPPED, SMP_PLAYING); stdcall_ret(c, 0, 1); 
+}
+SHIM(mss32, _AIL_end_sample_4)
+{
+    MSSLOG("_AIL_end_sample_4(%08X %08X %08X)", ARG(0), ARG(1), ARG(2));
+    set_status(ARG(0), SMP_PLAYING | SMP_STOPPED, SMP_DONE); stdcall_ret(c, 0, 1); 
+}
 
 SHIM(mss32, _AIL_sample_status_4)
 {
     Voice *v = voice_of(ARG(0));
+    if (v && (v->qbuf[0] || v->qbuf[1]))
+        MSSLOG("_AIL_sample_status(%08X) = %u", ARG(0), v->status);
     stdcall_ret(c, v ? v->status : SMP_FREE, 1);
 }
 
@@ -667,12 +689,16 @@ static uint32_t voice_frames(const Voice *v)
 SHIM(mss32, _AIL_sample_position_4)
 {
     Voice *v = voice_of(ARG(0));
-    stdcall_ret(c, v ? (uint32_t)v->pos * frame_bytes(v) : 0u, 1);
+    uint32_t r = v ? (uint32_t)v->pos * frame_bytes(v) : 0u;
+    MSSLOG("_AIL_sample_position(%08X) = %u (buf %d full %d/%d status %u)", ARG(0), r, v ? v->qcur : -1,
+           v ? v->qfull[0] : -1, v ? v->qfull[1] : -1, v ? v->status : 0u);
+    stdcall_ret(c, r, 1);
 }
 
 /* AIL_sample_ms_position(s, S32 *total_ms, S32 *current_ms) */
 SHIM(mss32, _AIL_sample_ms_position_12)
 {
+    MSSLOG("_AIL_sample_ms_position_12(%08X %08X %08X)", ARG(0), ARG(1), ARG(2));
     Voice *v = voice_of(ARG(0));
     uint32_t total = 0, cur = 0;
     if (v && v->rate) {
@@ -688,6 +714,7 @@ SHIM(mss32, _AIL_sample_ms_position_12)
 
 SHIM(mss32, _AIL_set_sample_ms_position_8)
 {
+    MSSLOG("_AIL_set_sample_ms_position_8(%08X %08X %08X)", ARG(0), ARG(1), ARG(2));
     SDL_LockMutex(lock);
     Voice *v = voice_of(ARG(0));
     if (v)
@@ -705,18 +732,25 @@ SHIM(mss32, _AIL_minimum_sample_buffer_size_12)
     stdcall_ret(c, (n + 1023u) & ~1023u, 3);
 }
 
-/* Which buffer wants data (0 or 1), -1 when both are queued. */
+/* Which buffer wants data (0 or 1), -1 when both are queued. Read without the
+ * mixer's lock: the game polls this in a tight loop while it waits for the audio
+ * of a video to play, and taking the lock that often starves the audio thread
+ * (it never gets to consume the buffers the game is waiting on). A -1 also
+ * yields the CPU for the same reason. */
 SHIM(mss32, _AIL_sample_buffer_ready_4)
 {
-    SDL_LockMutex(lock);
     Voice *v = voice_of(ARG(0));
     int32_t r = -1;
     if (v) {
-        int next = v->qfull[v->qcur] ? v->qcur ^ 1 : v->qcur;
-        if (!v->qfull[next])
+        int cur = __atomic_load_n(&v->qcur, __ATOMIC_ACQUIRE);
+        int full_cur = __atomic_load_n(&v->qfull[cur], __ATOMIC_ACQUIRE);
+        int next = full_cur ? cur ^ 1 : cur;
+        if (!__atomic_load_n(&v->qfull[next], __ATOMIC_ACQUIRE))
             r = next;
     }
-    SDL_UnlockMutex(lock);
+    MSSLOG("_AIL_sample_buffer_ready(%08X) = %d", ARG(0), r);
+    if (r < 0)
+        SDL_Delay(1);
     stdcall_ret(c, (uint32_t)r, 1);
 }
 
@@ -724,6 +758,7 @@ SHIM(mss32, _AIL_sample_buffer_ready_4)
 SHIM(mss32, _AIL_load_sample_buffer_16)
 {
     uint32_t num = ARG(1) & 1u, buf = ARG(2), len = ARG(3);
+    MSSLOG("_AIL_load_sample_buffer(%08X, %u, %08X, %u)", ARG(0), ARG(1), buf, len);
     SDL_LockMutex(lock);
     Voice *v = voice_of(ARG(0));
     if (v) {

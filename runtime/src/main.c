@@ -256,7 +256,24 @@ static void log_call(uint32_t i)
 /* Diagnostic entry probes (FF_PROBES at configure time): log the call. */
 void rt_probe(Ctx *c, uint32_t func)
 {
-    if (getenv("COD_PEEK")) { uint32_t a = (uint32_t)strtoul(getenv("COD_PEEK"), NULL, 16); rt_log("peek %08X = %08X %08X", a, RD32(a), RD32(a + 4u)); }
+    /* COD_PEEK="addr[:words],...": guest memory logged at every probe (diagnostics). */
+    if (getenv("COD_PEEK")) {
+        char line[1024];
+        size_t n = 0;
+        for (const char *p = getenv("COD_PEEK"); *p && n < sizeof(line) - 64;) {
+            char *end;
+            uint32_t a = (uint32_t)strtoul(p, &end, 16), w = 2;
+            if (*end == ':')
+                w = (uint32_t)strtoul(end + 1, &end, 10);
+            n += (size_t)snprintf(line + n, sizeof(line) - n, " %08X:", a);
+            for (uint32_t k = 0; k < w && n < sizeof(line) - 16; k++)
+                n += (size_t)snprintf(line + n, sizeof(line) - n, " %08X", RD32(a + 4u * k));
+            p = *end == ',' ? end + 1 : end;
+            if (end == p && *p != ',')
+                break;
+        }
+        rt_log("peek%s", line);
+    }
     rt_log("probe %08X: ret=%08X ecx=%08X args %08X %08X %08X", func, RD32(c->r[4]), c->r[1],
            RD32(c->r[4] + 4u), RD32(c->r[4] + 8u), RD32(c->r[4] + 12u));
 }

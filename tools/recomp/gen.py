@@ -80,7 +80,10 @@ HLE = {}
 
 # Game functions replaced for port features, same format and matching as HLE but
 # always applied.
-PATCHES = {}
+PATCHES = {
+    # CIN reset (RoQ restart): also clear the target frame (runtime/src/cod_fixes.c).
+    0x00406DA0: ('cod_fix_cin_reset', 0x80, '17998b854f3f1fac6316029917c6434065ad9e90'),
+}
 
 # Game functions with hand-decompiled native versions (runtime/src/native_*.c): entry ->
 # (host function, [(address, size, SHA-1)] of every piece of guest code the native
