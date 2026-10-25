@@ -36,6 +36,9 @@ void glm_glGetString(Ctx *c)
             continue;
         if (!cache[i]) {
             const char *s = e == GL_EXTENSIONS ? gl_extensions : (const char *)glGetString(e);
+            if (e == GL_EXTENSIONS && getenv("COD_NO_S3TC"))
+                s = "GL_ARB_multitexture GL_EXT_compiled_vertex_array GL_ARB_texture_env_add GL_EXT_texture_env_add "
+                    "GL_ARB_texture_env_combine GL_EXT_draw_range_elements GL_ARB_texture_cube_map";
             if (e == GL_VERSION)
                 s = "1.3.0";
             cache[i] = scratch_strdup(s ? s : "");
@@ -86,6 +89,200 @@ void glm_glReadPixels(Ctx *c)
                  gptr(ARG(6)));
     stdcall_ret(c, c->r[0], 7);
 }
+
+/* ---- textures ---------------------------------------------------------------
+ * The Vita gets no compressed textures: compressed uploads to vitaGL corrupted
+ * memory while a level loaded (the Freedom Fighters port saw the same). DXT
+ * images are decoded to RGBA here, and a compressed internal format asked of
+ * glTexImage2D becomes the plain one. Elsewhere the driver takes them as they are. */
+
+#define GL_DXT1_RGB 0x83F0u
+#define GL_DXT1_RGBA 0x83F1u
+#define GL_DXT3 0x83F2u
+#define GL_DXT5 0x83F3u
+
+typedef void (*pfn_teximage)(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, const void *);
+typedef void (*pfn_ctex)(GLenum, GLint, GLenum, GLsizei, GLsizei, GLint, GLsizei, const void *);
+typedef void (*pfn_csubtex)(GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLsizei, const void *);
+
+static void *gl_host(const char *name)
+{
+    void *p = platform_gl_proc(name);
+    if (!p) {
+        size_t n = strlen(name);
+        char core[96];
+        if (n > 3 && n < sizeof(core)) {
+            snprintf(core, sizeof(core), "%.*s", (int)(n - 3), name);
+            p = platform_gl_proc(core);
+        }
+    }
+    return p;
+}
+
+static uint32_t rgb565_rgba(uint32_t c)
+{
+    uint32_t r = (c >> 11) & 31u, g = (c >> 5) & 63u, b = c & 31u;
+    return ((r << 3) | (r >> 2)) | (((g << 2) | (g >> 4)) << 8) | (((b << 3) | (b >> 2)) << 16) | 0xFF000000u;
+}
+
+static uint32_t mix_rgba(uint32_t a, uint32_t b, uint32_t wa, uint32_t wb, uint32_t d)
+{
+    uint32_t out = 0xFF000000u;
+    for (int sh = 0; sh < 24; sh += 8)
+        out |= ((((a >> sh) & 0xFFu) * wa + ((b >> sh) & 0xFFu) * wb) / d) << sh;
+    return out;
+}
+
+/* The 16 colors of a DXT color block (4 bytes of endpoints, 4 of indices). */
+static void dxt_colors(const uint8_t *b, int dxt1, uint32_t *px)
+{
+    uint32_t c0 = (uint32_t)b[0] | ((uint32_t)b[1] << 8), c1 = (uint32_t)b[2] | ((uint32_t)b[3] << 8);
+    uint32_t pal[4];
+    pal[0] = rgb565_rgba(c0);
+    pal[1] = rgb565_rgba(c1);
+    if (c0 > c1 || !dxt1) {
+        pal[2] = mix_rgba(pal[0], pal[1], 2, 1, 3);
+        pal[3] = mix_rgba(pal[0], pal[1], 1, 2, 3);
+    } else {
+        pal[2] = mix_rgba(pal[0], pal[1], 1, 1, 2);
+        pal[3] = 0;                      /* transparent black */
+    }
+    uint32_t bits = (uint32_t)b[4] | ((uint32_t)b[5] << 8) | ((uint32_t)b[6] << 16) | ((uint32_t)b[7] << 24);
+    for (int i = 0; i < 16; i++)
+        px[i] = pal[(bits >> (2 * i)) & 3u];
+}
+
+static void dxt5_alpha(const uint8_t *b, uint32_t *px)
+{
+    uint32_t a[8];
+    a[0] = b[0];
+    a[1] = b[1];
+    if (a[0] > a[1]) {
+        for (int i = 1; i < 7; i++)
+            a[i + 1] = ((7u - (uint32_t)i) * a[0] + (uint32_t)i * a[1]) / 7u;
+    } else {
+        for (int i = 1; i < 5; i++)
+            a[i + 1] = ((5u - (uint32_t)i) * a[0] + (uint32_t)i * a[1]) / 5u;
+        a[6] = 0;
+        a[7] = 255;
+    }
+    uint64_t bits = 0;
+    for (int i = 0; i < 6; i++)
+        bits |= (uint64_t)b[2 + i] << (8 * i);
+    for (int i = 0; i < 16; i++)
+        px[i] = (px[i] & 0x00FFFFFFu) | (a[(bits >> (3 * i)) & 7u] << 24);
+}
+
+/* A w x h DXT image (format fmt) to RGBA8, or NULL for another format. */
+static uint32_t *dxt_decode(GLenum fmt, const uint8_t *src, uint32_t w, uint32_t h)
+{
+    if (fmt < GL_DXT1_RGB || fmt > GL_DXT5 || !src || !w || !h)
+        return NULL;
+    uint32_t *out = malloc((size_t)w * h * 4u);
+    if (!out)
+        return NULL;
+    uint32_t bw = (w + 3u) / 4u, bh = (h + 3u) / 4u;
+    uint32_t bsize = fmt <= GL_DXT1_RGBA ? 8u : 16u;
+    for (uint32_t by = 0; by < bh; by++) {
+        for (uint32_t bx = 0; bx < bw; bx++) {
+            const uint8_t *b = src + (by * bw + bx) * bsize;
+            uint32_t px[16];
+            if (bsize == 8u) {
+                dxt_colors(b, 1, px);
+            } else {
+                dxt_colors(b + 8, 0, px);
+                if (fmt == GL_DXT3) {
+                    for (int i = 0; i < 16; i++) {
+                        uint32_t a4 = (b[i / 2] >> (4 * (i & 1))) & 15u;
+                        px[i] = (px[i] & 0x00FFFFFFu) | ((a4 * 17u) << 24);
+                    }
+                } else {
+                    dxt5_alpha(b, px);
+                }
+            }
+            for (uint32_t y = 0; y < 4u && by * 4u + y < h; y++)
+                for (uint32_t x = 0; x < 4u && bx * 4u + x < w; x++)
+                    out[(size_t)(by * 4u + y) * w + bx * 4u + x] = px[y * 4u + x];
+        }
+    }
+    return out;
+}
+
+#if defined(__vita__)
+static GLint plain_format(GLint f)
+{
+    switch ((uint32_t)f) {
+    case GL_DXT1_RGB: case 0x84EDu: /* GL_COMPRESSED_RGB_ARB */ return GL_RGB;
+    case GL_DXT1_RGBA: case GL_DXT3: case GL_DXT5: case 0x84EEu: /* GL_COMPRESSED_RGBA_ARB */ return GL_RGBA;
+    default: return f;
+    }
+}
+#endif
+
+void glm_glTexImage2D(Ctx *c)
+{
+    static pfn_teximage fn;
+    if (!fn)
+        fn = (pfn_teximage)gl_host("glTexImage2D");
+    GLint ifmt = (GLint)ARG(2);
+#if defined(__vita__)
+    ifmt = plain_format(ifmt);
+#endif
+    fn((GLenum)ARG(0), (GLint)ARG(1), ifmt, (GLsizei)ARG(3), (GLsizei)ARG(4), (GLint)ARG(5), (GLenum)ARG(6),
+       (GLenum)ARG(7), gptr(ARG(8)));
+    stdcall_ret(c, c->r[0], 9);
+}
+
+static void compressed_image(Ctx *c, const char *name)
+{
+    GLenum target = (GLenum)ARG(0), fmt = (GLenum)ARG(2);
+    GLint level = (GLint)ARG(1), border = (GLint)ARG(5);
+    GLsizei w = (GLsizei)ARG(3), h = (GLsizei)ARG(4), size = (GLsizei)ARG(6);
+    const void *data = gptr(ARG(7));
+#if defined(__vita__)
+    (void)name, (void)size;
+    uint32_t *rgba = dxt_decode(fmt, data, (uint32_t)w, (uint32_t)h);
+    if (rgba) {
+        glTexImage2D(target, level, GL_RGBA, w, h, border, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+        free(rgba);
+    } else {
+        rt_log("glCompressedTexImage2D: format %04X not decoded", fmt);
+    }
+#else
+    static pfn_ctex fn;
+    if (!fn)
+        fn = (pfn_ctex)gl_host(name);
+    fn(target, level, fmt, w, h, border, size, data);
+#endif
+    stdcall_ret(c, c->r[0], 8);
+}
+
+static void compressed_subimage(Ctx *c, const char *name)
+{
+    GLenum target = (GLenum)ARG(0), fmt = (GLenum)ARG(6);
+    GLint level = (GLint)ARG(1), x = (GLint)ARG(2), y = (GLint)ARG(3);
+    GLsizei w = (GLsizei)ARG(4), h = (GLsizei)ARG(5), size = (GLsizei)ARG(7);
+    const void *data = gptr(ARG(8));
+#if defined(__vita__)
+    (void)name, (void)size;
+    uint32_t *rgba = dxt_decode(fmt, data, (uint32_t)w, (uint32_t)h);
+    if (rgba) {
+        glTexSubImage2D(target, level, x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+        free(rgba);
+    }
+#else
+    static pfn_csubtex fn;
+    if (!fn)
+        fn = (pfn_csubtex)gl_host(name);
+    fn(target, level, x, y, w, h, fmt, size, data);
+#endif
+    stdcall_ret(c, c->r[0], 9);
+}
+
+void glm_glCompressedTexImage2D(Ctx *c) { compressed_image(c, "glCompressedTexImage2D"); }
+void glm_glCompressedTexImage2DARB(Ctx *c) { compressed_image(c, "glCompressedTexImage2DARB"); }
+void glm_glCompressedTexSubImage2D(Ctx *c) { compressed_subimage(c, "glCompressedTexSubImage2D"); }
+void glm_glCompressedTexSubImage2DARB(Ctx *c) { compressed_subimage(c, "glCompressedTexSubImage2DARB"); }
 
 /* Compiled vertex arrays are only a hint. */
 void glm_glLockArraysEXT(Ctx *c) { stdcall_ret(c, c->r[0], 2); }

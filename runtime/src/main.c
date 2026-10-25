@@ -52,7 +52,10 @@ void rt_log(const char *fmt, ...)
 #endif
     if (log_file) {
         fprintf(log_file, "[%7.3f] %s\n", t, line);
-        if (t - log_flushed_at >= 0.25) {
+        static int sync = -1;
+        if (sync < 0)
+            sync = getenv("COD_LOG_SYNC") != NULL;   /* every line (crash hunting) */
+        if (sync || t - log_flushed_at >= 0.25) {
             fflush(log_file);
             log_flushed_at = t;
         }

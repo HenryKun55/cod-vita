@@ -4,10 +4,15 @@
 
 void glm_glViewport(Ctx *c);
 void glm_glUnlockArraysEXT(Ctx *c);
+void glm_glTexImage2D(Ctx *c);
 void glm_glScissor(Ctx *c);
 void glm_glReadPixels(Ctx *c);
 void glm_glLockArraysEXT(Ctx *c);
 void glm_glGetString(Ctx *c);
+void glm_glCompressedTexSubImage2DARB(Ctx *c);
+void glm_glCompressedTexSubImage2D(Ctx *c);
+void glm_glCompressedTexImage2DARB(Ctx *c);
+void glm_glCompressedTexImage2D(Ctx *c);
 typedef void (*pfn_glAccum)(GLenum, GLfloat);
 static pfn_glAccum p_glAccum;
 static void gl_glAccum(Ctx *c)
@@ -629,24 +634,6 @@ static void gl_glCompressedTexImage1DARB(Ctx *c)
     stdcall_ret(c, c->r[0], 7);
 }
 
-typedef void (*pfn_glCompressedTexImage2D)(GLenum, GLint, GLenum, GLsizei, GLsizei, GLint, GLsizei, void *);
-static pfn_glCompressedTexImage2D p_glCompressedTexImage2D;
-static void gl_glCompressedTexImage2D(Ctx *c)
-{
-    p_glCompressedTexImage2D((GLenum)ARG(0), (GLint)ARG(1), (GLenum)ARG(2), (GLsizei)ARG(3), (GLsizei)ARG(4), (GLint)ARG(5), (GLsizei)ARG(6), gptr(ARG(7)));
-    GL_TRACE("glCompressedTexImage2D");
-    stdcall_ret(c, c->r[0], 8);
-}
-
-typedef void (*pfn_glCompressedTexImage2DARB)(GLenum, GLint, GLenum, GLsizei, GLsizei, GLint, GLsizei, void *);
-static pfn_glCompressedTexImage2DARB p_glCompressedTexImage2DARB;
-static void gl_glCompressedTexImage2DARB(Ctx *c)
-{
-    p_glCompressedTexImage2DARB((GLenum)ARG(0), (GLint)ARG(1), (GLenum)ARG(2), (GLsizei)ARG(3), (GLsizei)ARG(4), (GLint)ARG(5), (GLsizei)ARG(6), gptr(ARG(7)));
-    GL_TRACE("glCompressedTexImage2DARB");
-    stdcall_ret(c, c->r[0], 8);
-}
-
 typedef void (*pfn_glCompressedTexImage3D)(GLenum, GLint, GLenum, GLsizei, GLsizei, GLsizei, GLint, GLsizei, void *);
 static pfn_glCompressedTexImage3D p_glCompressedTexImage3D;
 static void gl_glCompressedTexImage3D(Ctx *c)
@@ -681,24 +668,6 @@ static void gl_glCompressedTexSubImage1DARB(Ctx *c)
     p_glCompressedTexSubImage1DARB((GLenum)ARG(0), (GLint)ARG(1), (GLint)ARG(2), (GLsizei)ARG(3), (GLenum)ARG(4), (GLsizei)ARG(5), gptr(ARG(6)));
     GL_TRACE("glCompressedTexSubImage1DARB");
     stdcall_ret(c, c->r[0], 7);
-}
-
-typedef void (*pfn_glCompressedTexSubImage2D)(GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLsizei, void *);
-static pfn_glCompressedTexSubImage2D p_glCompressedTexSubImage2D;
-static void gl_glCompressedTexSubImage2D(Ctx *c)
-{
-    p_glCompressedTexSubImage2D((GLenum)ARG(0), (GLint)ARG(1), (GLint)ARG(2), (GLint)ARG(3), (GLsizei)ARG(4), (GLsizei)ARG(5), (GLenum)ARG(6), (GLsizei)ARG(7), gptr(ARG(8)));
-    GL_TRACE("glCompressedTexSubImage2D");
-    stdcall_ret(c, c->r[0], 9);
-}
-
-typedef void (*pfn_glCompressedTexSubImage2DARB)(GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLsizei, void *);
-static pfn_glCompressedTexSubImage2DARB p_glCompressedTexSubImage2DARB;
-static void gl_glCompressedTexSubImage2DARB(Ctx *c)
-{
-    p_glCompressedTexSubImage2DARB((GLenum)ARG(0), (GLint)ARG(1), (GLint)ARG(2), (GLint)ARG(3), (GLsizei)ARG(4), (GLsizei)ARG(5), (GLenum)ARG(6), (GLsizei)ARG(7), gptr(ARG(8)));
-    GL_TRACE("glCompressedTexSubImage2DARB");
-    stdcall_ret(c, c->r[0], 9);
 }
 
 typedef void (*pfn_glCompressedTexSubImage3D)(GLenum, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei, GLenum, GLsizei, void *);
@@ -3311,15 +3280,6 @@ static void gl_glTexImage1D(Ctx *c)
     stdcall_ret(c, c->r[0], 8);
 }
 
-typedef void (*pfn_glTexImage2D)(GLenum, GLint, GLint, GLsizei, GLsizei, GLint, GLenum, GLenum, void *);
-static pfn_glTexImage2D p_glTexImage2D;
-static void gl_glTexImage2D(Ctx *c)
-{
-    p_glTexImage2D((GLenum)ARG(0), (GLint)ARG(1), (GLint)ARG(2), (GLsizei)ARG(3), (GLsizei)ARG(4), (GLint)ARG(5), (GLenum)ARG(6), (GLenum)ARG(7), gptr(ARG(8)));
-    GL_TRACE("glTexImage2D");
-    stdcall_ret(c, c->r[0], 9);
-}
-
 typedef void (*pfn_glTexParameterf)(GLenum, GLenum, GLfloat);
 static pfn_glTexParameterf p_glTexParameterf;
 static void gl_glTexParameterf(Ctx *c)
@@ -4038,14 +3998,14 @@ const GlEntry g_gl_entries[] = {
     { "glCombinerStageParameterfvNV", gl_glCombinerStageParameterfvNV, (void **)&p_glCombinerStageParameterfvNV },
     { "glCompressedTexImage1D", gl_glCompressedTexImage1D, (void **)&p_glCompressedTexImage1D },
     { "glCompressedTexImage1DARB", gl_glCompressedTexImage1DARB, (void **)&p_glCompressedTexImage1DARB },
-    { "glCompressedTexImage2D", gl_glCompressedTexImage2D, (void **)&p_glCompressedTexImage2D },
-    { "glCompressedTexImage2DARB", gl_glCompressedTexImage2DARB, (void **)&p_glCompressedTexImage2DARB },
+    { "glCompressedTexImage2D", glm_glCompressedTexImage2D, NULL },
+    { "glCompressedTexImage2DARB", glm_glCompressedTexImage2DARB, NULL },
     { "glCompressedTexImage3D", gl_glCompressedTexImage3D, (void **)&p_glCompressedTexImage3D },
     { "glCompressedTexImage3DARB", gl_glCompressedTexImage3DARB, (void **)&p_glCompressedTexImage3DARB },
     { "glCompressedTexSubImage1D", gl_glCompressedTexSubImage1D, (void **)&p_glCompressedTexSubImage1D },
     { "glCompressedTexSubImage1DARB", gl_glCompressedTexSubImage1DARB, (void **)&p_glCompressedTexSubImage1DARB },
-    { "glCompressedTexSubImage2D", gl_glCompressedTexSubImage2D, (void **)&p_glCompressedTexSubImage2D },
-    { "glCompressedTexSubImage2DARB", gl_glCompressedTexSubImage2DARB, (void **)&p_glCompressedTexSubImage2DARB },
+    { "glCompressedTexSubImage2D", glm_glCompressedTexSubImage2D, NULL },
+    { "glCompressedTexSubImage2DARB", glm_glCompressedTexSubImage2DARB, NULL },
     { "glCompressedTexSubImage3D", gl_glCompressedTexSubImage3D, (void **)&p_glCompressedTexSubImage3D },
     { "glCompressedTexSubImage3DARB", gl_glCompressedTexSubImage3DARB, (void **)&p_glCompressedTexSubImage3DARB },
     { "glCopyPixels", gl_glCopyPixels, (void **)&p_glCopyPixels },
@@ -4340,7 +4300,7 @@ const GlEntry g_gl_entries[] = {
     { "glTexGeni", gl_glTexGeni, (void **)&p_glTexGeni },
     { "glTexGeniv", gl_glTexGeniv, (void **)&p_glTexGeniv },
     { "glTexImage1D", gl_glTexImage1D, (void **)&p_glTexImage1D },
-    { "glTexImage2D", gl_glTexImage2D, (void **)&p_glTexImage2D },
+    { "glTexImage2D", glm_glTexImage2D, NULL },
     { "glTexParameterf", gl_glTexParameterf, (void **)&p_glTexParameterf },
     { "glTexParameterfv", gl_glTexParameterfv, (void **)&p_glTexParameterfv },
     { "glTexParameteri", gl_glTexParameteri, (void **)&p_glTexParameteri },

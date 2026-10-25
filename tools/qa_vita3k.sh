@@ -13,6 +13,7 @@
 #        MHZ     emulated CPU clock (default 333, the console's)
 #        ARGS    the game's command line (ux0:data/cod1/args.txt), e.g. "+map training"
 #        ENV     "NAME=value;..." environment of the run (ux0:data/cod1/env.txt)
+#        TEXCACHE=0  Vita3K's texture cache off
 #        VITA3K  Vita3K binary (default the local source build)
 #        TIMEOUT seconds (default 300)
 set -u
@@ -50,6 +51,8 @@ if [ ! -d "$FS/vs0" ]; then
     [ -d "$MAIN/fs/ux0/user" ] && cp -R "$MAIN/fs/ux0/user/." "$FS/ux0/user/"
 fi
 sed "s|^pref-path:.*|pref-path: $FS|" "$MAIN/config.yml" > "$CONF"
+# TEXCACHE=0: Vita3K's texture cache off (it write-protects texture memory).
+if [ "${TEXCACHE:-1}" = 0 ]; then sed -i '' "s|^texture-cache:.*|texture-cache: false|" "$CONF"; fi
 MAIN_CONF_SAVE="$HOME_QA/main-config.yml.save"
 cp "$MAIN/config.yml" "$MAIN_CONF_SAVE"
 
