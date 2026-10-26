@@ -21,9 +21,9 @@ def main():
     # 16:9 crop of the 4:3 art, from the top (the logo and the gun).
     ch = w * 9 // 16
     wide = art.crop((0, 0, w, min(h, ch)))
-    wide.resize((960, 544), Image.LANCZOS).save(os.path.join(out, 'pic0.png'))
-    wide.resize((840, 500), Image.LANCZOS).save(os.path.join(out, 'livearea', 'contents', 'bg.png'))
-    wide.resize((280, 158), Image.LANCZOS).save(os.path.join(out, 'livearea', 'contents', 'startup.png'))
+    wide.resize((960, 544), Image.LANCZOS).convert('P', palette=Image.ADAPTIVE).save(os.path.join(out, 'pic0.png'))
+    wide.resize((840, 500), Image.LANCZOS).convert('P', palette=Image.ADAPTIVE).save(os.path.join(out, 'livearea', 'contents', 'bg.png'))
+    wide.resize((280, 158), Image.LANCZOS).convert('P', palette=Image.ADAPTIVE).save(os.path.join(out, 'livearea', 'contents', 'startup.png'))
     # Icon: the right part of the art (the logo), square.
     side = h // 2
     icon = art.crop((w - side - w // 40, h // 12, w - w // 40, h // 12 + side))

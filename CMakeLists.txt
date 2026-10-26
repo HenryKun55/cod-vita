@@ -134,6 +134,7 @@ if(VITA)
     execute_process(
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/make_vita_livearea.py" "${COD_DIR}" "${COD_SCE_SYS}"
         RESULT_VARIABLE COD_LIVEAREA_RESULT)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tools/make_vita_livearea.py")
     if(NOT COD_LIVEAREA_RESULT EQUAL 0)
         message(FATAL_ERROR "tools/make_vita_livearea.py failed (it needs Pillow: pip install Pillow)")
     endif()
