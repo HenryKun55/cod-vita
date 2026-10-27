@@ -5,6 +5,7 @@
 #include "shim.h"
 
 #include <ctype.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <strings.h>
@@ -18,7 +19,34 @@
 
 #define TLS_SLOTS 64u
 static uint8_t tls_used[TLS_SLOTS];
-static __thread uint32_t tls_value[TLS_SLOTS];
+
+/* Each host thread's slots, found by rt_thread_tag (__thread is not per thread
+ * on the Vita, and the render thread needs its own C runtime data). The game
+ * thread is nearly always the first entry. */
+#define TLS_THREADS 32u
+static struct {
+    uintptr_t tag;
+    uint32_t v[TLS_SLOTS];
+} tls_threads[TLS_THREADS];
+static uint32_t tls_nthreads;
+static pthread_mutex_t tls_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static uint32_t *tls_slots(void)
+{
+    uintptr_t t = rt_thread_tag();
+    uint32_t n = __atomic_load_n(&tls_nthreads, __ATOMIC_ACQUIRE);
+    for (uint32_t i = 0; i < n; i++)
+        if (tls_threads[i].tag == t)
+            return tls_threads[i].v;
+    pthread_mutex_lock(&tls_lock);
+    uint32_t i = tls_nthreads;
+    if (i == TLS_THREADS)
+        rt_fatal(NULL, "TLS: more than %u threads", TLS_THREADS);
+    tls_threads[i].tag = t;
+    __atomic_store_n(&tls_nthreads, i + 1u, __ATOMIC_RELEASE);
+    pthread_mutex_unlock(&tls_lock);
+    return tls_threads[i].v;
+}
 
 SHIM(kernel32, TlsAlloc)
 {
@@ -43,14 +71,14 @@ SHIM(kernel32, TlsGetValue)
 {
     uint32_t i = ARG(0);
     win32_set_last_error(0);
-    stdcall_ret(c, i < TLS_SLOTS ? tls_value[i] : 0u, 1);
+    stdcall_ret(c, i < TLS_SLOTS ? tls_slots()[i] : 0u, 1);
 }
 
 SHIM(kernel32, TlsSetValue)
 {
     uint32_t i = ARG(0);
     if (i < TLS_SLOTS)
-        tls_value[i] = ARG(1);
+        tls_slots()[i] = ARG(1);
     stdcall_ret(c, i < TLS_SLOTS, 2);
 }
 

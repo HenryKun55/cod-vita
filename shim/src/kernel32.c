@@ -252,10 +252,12 @@ uint32_t win32_get_proc(const char *dll, const char *name)
 SHIM(kernel32, GetCurrentProcess) { stdcall_ret(c, 0xFFFFFFFFu, 0); }
 
 void platform_shutdown(void);
+void render_async_sync(void);
 
 SHIM(kernel32, ExitProcess)
 {
     rt_log("ExitProcess(%u)", ARG(0));
+    render_async_sync();
     platform_shutdown();
     exit((int)ARG(0));
 }

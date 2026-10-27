@@ -80,7 +80,9 @@ trap 'stop; exit 1' INT TERM
 WINID_BIN=${TMPDIR:-/tmp}/cod1_window_id
 [ "$WINID_BIN" -nt "$ROOT/tools/window_id.swift" ] || swiftc -O "$ROOT/tools/window_id.swift" -o "$WINID_BIN" || exit 1
 
-(VITA3K_PREF_PATH="$FS/" VITA3K_CPU_MHZ=${MHZ:-333} "$VITA3K" -c "$CONF" -w -r $TITLE > "$LOG" 2>&1 &)
+# The log is capped: a guest thread stuck on a bad read logs the fault forever
+# (22 GB in one run).
+(VITA3K_PREF_PATH="$FS/" VITA3K_CPU_MHZ=${MHZ:-333} "$VITA3K" -c "$CONF" -w -r $TITLE 2>&1 | head -c 200000000 > "$LOG" &)
 started=0
 while [ $started -lt 30 ] && ! pgrep -f "$MATCH" > /dev/null; do
     sleep 1

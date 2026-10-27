@@ -83,6 +83,78 @@ HLE = {}
 PATCHES = {
     # CIN reset (RoQ restart): also clear the target frame (runtime/src/cod_fixes.c).
     0x00406DA0: ('cod_fix_cin_reset', 0x80, '17998b854f3f1fac6316029917c6434065ad9e90'),
+    # RB_ExecuteRenderCommands: the end of a frame runs on the render thread
+    # (shim/src/render_async.c).
+    0x004CEA70: ('cod_render_execute', 0x30, 'b7c51b6511dcbabf19611c1376e5cd2cfb3563e6'),
+    # The renderer's font lookup through the UI module (text drawing in the back
+    # end): cached, so the render thread does not enter the UI's VM.
+    0x0040E430: ('cod_render_font', 0x25, '71c44edfcccf27c6a19da58e13ceb2a5c7403fce'),
+}
+
+# The renderer's entry points (CoDSP.exe's refexport_t, filled by GetRefAPI at
+# 004A94C0): entry -> SHA-1 of the first 16 bytes. Each first waits for the render
+# thread (cod_render_wait_entry, shim/src/render_async.c), so the renderer's front
+# end never runs while the back end draws.
+RENDER_WAIT = {
+    0x004A5F40: '5b8d566d650772de408278d01c860d0616516534',   # refexport +0xB8
+    0x004A65B0: '44b284a0d2bc9bc4138fe3b9864ef809d31ce25e',   # refexport +0xBC
+    0x004A8FE0: 'f82639453ccfbff64b14d79d5cada23ae9b2d0a4',   # refexport +0x0
+    0x004A9130: 'a203ecd8febb25db1a879dd7ff148228ca57d8a1',   # refexport +0x38
+    0x004A9180: 'acdb3360e9643cb99bf0f9a20b00551bc2618bdc',   # refexport +0xCC
+    0x004A93F0: '6ba0cb65c7a32cad6ae189c1153c56ab943422cb',   # refexport +0xD0
+    0x004ADAD0: '4e0d25953ba825772225e37f6265487d46facaad',   # refexport +0xC0
+    0x004ADAF0: '51128d637c912f1d603aff56ffef8b33797cc4ec',   # refexport +0xC4
+    0x004ADB10: 'ff81b1de370326e89a6702302bf6358ae5639140',   # refexport +0xC8
+    0x004C8AA0: '42c03c380b9bdfa6007deda45256f445149e7cff',   # refexport +0x58
+    0x004C8C40: '648d4363b021898abcecf688986e6e9c809d949d',   # refexport +0x5C
+    0x004C8C90: '1e2fd224068e91d21fedcd23102c7a2f028f88d3',   # refexport +0x60
+    0x004CCD10: 'd692acda6889ebe308cea4f880616030709ff340',   # refexport +0x80
+    0x004CD1F0: '9402af0610fc88f2c73888dfa6cba46828b77e02',   # refexport +0x84
+    0x004CEC10: '884ccbf8eb0495f0f4310c9af9c61b74a8716128',   # refexport +0x68
+    0x004D2AA0: 'fc8121e3f39c6c222a3efc2d856401f05a582687',   # refexport +0xAC
+    0x004D3590: '447155b0d060fc871ed33a648d15d4b1cd6ed318',   # refexport +0x18
+    0x004D42A0: '408d4e3e44fd13952daaa93a08016f477a5d3e86',   # refexport +0x6C
+    0x004D4330: '846b52a7a154f72488eae3663af123b1294ebf6d',   # refexport +0x70
+    0x004D43D0: 'd8c135201fa7bb4a02e232f21a60bc672cb8a0d2',   # refexport +0x74
+    0x004D44D0: 'acc7e409f6eef58bcdf2805911119ade35bec20f',   # refexport +0x78
+    0x004D45B0: 'e54e01092b260e763d7439a8144a6f195e5de0d5',   # refexport +0x7C
+    0x004D4680: '1e5daa5ee0ffade4b5e810c576c7ef77626d209d',   # refexport +0x88
+    0x004D4A60: '7116f2e9a42d63c92186c02a8a94bd0667d1b2ac',   # refexport +0x8C
+    0x004D4B40: '13bf4d97f4bb67615a42e33f2bf73740ac5233bf',   # refexport +0x90
+    0x004D4B70: '36b847fba0fa7d415af64dabd3269f227d1b99cd',   # refexport +0x94
+    0x004D4BB0: 'ea869ddd3c6e1b0df4ab5d3b97bb9e72b50dea84',   # refexport +0xA0
+    0x004D4BC0: '17db36d4189b92745a359b904264540aacb83f84',   # refexport +0xA4
+    0x004D5520: 'dcbd8def4053ab0e96f70f30f6e3515ec5079b88',   # refexport +0xA8
+    0x004D5A40: '10f39bbc890d8836294398a266cadcb4f95ea807',   # refexport +0xD4
+    0x004D5D30: '4359385b31c2120759f3f6218e8592732bbcd88c',   # refexport +0xD8
+    0x004D5D60: 'c5278f2762ccb74e2278970bb472d2d2f40d9ae1',   # refexport +0xDC
+    0x004D6110: 'bf6065fc0649b836eb62d1580ec1c483e481e383',   # refexport +0xE0
+    0x004D6250: 'a697a2bceb1855c78e079e8016f481d8c9fcbfba',   # refexport +0xE4
+    0x004D6400: '928e3e3134c34a76450013e79978642d138a023c',   # refexport +0xE8
+    0x004D6880: '1d73b81964835b41ae251baa4486e4b3d8c550f7',   # refexport +0x34
+    0x004DA0C0: '76318455d67966fe9ab8fae63149eec9cf6417d8',   # refexport +0x50
+    0x004DDFC0: '413f6f1ecda90333194acf620215e90cf9c5e978',   # refexport +0x98
+    0x004DE950: 'd79e82cc20453ac93dfa59b0f14c3895d53025ee',   # refexport +0x3C
+    0x004DEA40: '7e48b4231fc93c82952d9144d9668ecbf1eef689',   # refexport +0x44
+    0x004DEAE0: '1f994cda24918776adfcf675efbe74a4534455e0',   # refexport +0x48
+    0x004DEC10: '9e2f8cb2f82b62820ae55a0fda039af338e09ca9',   # refexport +0x40
+    0x004DED10: 'b3a1d99caa0865e1012be724c31106ea4bb1d07e',   # refexport +0x4C
+    0x004DEE20: '240b4f9aae1db425b0a912b97c4d843b4145a943',   # refexport +0x54
+    0x004DEEC0: 'f81fb40859f061da621b46c63dc3b2d5829be9c9',   # refexport +0x64
+    0x004DF5F0: '4a14a7df62f5601fd38fbabf9420df17acd3cb07',   # refexport +0xB0
+    0x004DF600: '446e5ce40b3adcd45d9c9d24d07c788d77f7ff00',   # refexport +0xB4
+    0x004DF9A0: 'ba2423e06af929dd6c132bcf94524f59378dd45d',   # refexport +0x2C
+    0x004E5CF0: '30e405a0361ba06fd0dc4ab196d0b8de791905fd',   # refexport +0x28
+    0x004F1CD0: '0552c519d15e64b962d742dc36c8abb4b53bf210',   # refexport +0x10
+    0x004F1D30: '0552c519d15e64b962d742dc36c8abb4b53bf210',   # refexport +0x14
+    0x004F2460: '64a119973840f378d8d53a111985f368c2906206',   # refexport +0x30
+    0x004F7EF0: '3b4b0382ebcdb7411a5a903a539acb5fe6e90281',   # refexport +0x8
+    0x004F8930: '47ee50541cde83b786e7c028391907ceb461c8c4',   # refexport +0xC
+    0x004F8A70: 'cf8861083c28d811a9a42f05a4bd93db13b7cb60',   # refexport +0x1C
+    0x004F8AA0: '78a21c57583446499ae71cc8ea1a7f6e3aeab941',   # refexport +0x20
+    0x004F8AC0: 'b12fbf2919ac4c97af01004ad17b753c4407cc81',   # refexport +0x24
+    0x004F8AD0: '1f3a3e70b178e710b0e261b82e5fa0e1cb0cee03',   # refexport +0x4
+    0x004F8C20: '87975776882848602bc8c298d88fb6288e2d8fa0',   # refexport +0x9C
 }
 
 # Game functions with hand-decompiled native versions (runtime/src/native_*.c): entry ->
@@ -2108,6 +2180,13 @@ class Generator:
                 self.hle[a] = name
             else:
                 print('warning: %08X does not match %s; running the guest code' % (a, name))
+        for a, digest in RENDER_WAIT.items():
+            if a in self.hle:
+                continue
+            if a in self.funcs and hashlib.sha1(self.an.pe.read(a, 16)).hexdigest() == digest:
+                self.hle[a] = 'cod_render_wait_entry'
+            else:
+                print('warning: %08X does not match the renderer entry point; no render thread wait' % a)
         for a, (name, pieces) in (NATIVE.items() if os.environ.get('COD_NATIVE') != '0' else ()):
             if a in self.funcs and all(hashlib.sha1(self.an.pe.read(p, n)).hexdigest() == d for p, n, d in pieces):
                 self.hle[a] = name

@@ -64,6 +64,26 @@ void rt_log_thunk_call(uint32_t addr);
 
 /* Call guest code from the host (stdcall or cdecl; stack is restored either way). */
 uint32_t guest_call(Ctx *c, uint32_t fn, int nargs, const uint32_t *args);
+/* A cheap identity of the calling host thread: on the Vita the thread's TLS
+ * pointer (TPIDRURO, one instruction; pthread_self is a system call and a list
+ * search, and __thread variables are not per thread there). */
+#if defined(__vita__)
+static inline uintptr_t rt_thread_tag(void)
+{
+    uintptr_t v;
+    __asm__ volatile("mrc p15, 0, %0, c13, c0, 3" : "=r"(v));
+    return v;
+}
+#else
+#include <pthread.h>
+static inline uintptr_t rt_thread_tag(void) { return (uintptr_t)pthread_self(); }
+#endif
+
+/* Gated thunks call rt_thunk_gate (when set) before running: the GL entry points
+ * wait there for the render thread (shim/src/render_async.c). */
+void thunk_mark_gated(uint32_t addr);
+int thunk_is_gated(uint32_t addr);
+extern void (*rt_thunk_gate)(void);
 
 /* Host pointer for a guest address. */
 static inline void *gptr(uint32_t a) { return a ? (void *)(g_mem + a) : NULL; }

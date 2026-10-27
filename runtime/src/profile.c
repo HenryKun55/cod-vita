@@ -122,9 +122,17 @@ static void count(uint32_t cur, const uint32_t *stack, uint32_t depth)
     map_add(&pairs, ((uint64_t)caller << 32) | cur);
 }
 
+extern RtProf rt_prof_render_thread __attribute__((weak));
+
 static void sample(void)
 {
-    map_add(&render_excl, rt_prof_render ? rt_prof_render : PROF_H_RUN);
+    /* The render thread (shim/src/render_async.c) when there is one: 0 is idle. */
+    if (&rt_prof_render_thread) {
+        uint32_t r = rt_prof_render_thread.cur;
+        map_add(&render_excl, r ? r : PROF_H_RIDLE);
+    } else {
+        map_add(&render_excl, rt_prof_render ? rt_prof_render : PROF_H_RUN);
+    }
     uint32_t cur = rt_prof_cur;
     uint32_t depth = rt_prof_main.depth;
     if (depth > RT_PROF_MAX)

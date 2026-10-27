@@ -106,9 +106,27 @@ static double log_calls_at = -1.0;
 
 static void log_call(uint32_t i);
 
+static uint8_t thunk_gated[THUNK_MAX];
+void (*rt_thunk_gate)(void);
+
+void thunk_mark_gated(uint32_t addr)
+{
+    uint32_t i = (addr - THUNK_BASE) / THUNK_STRIDE;
+    if (i < THUNK_MAX)
+        thunk_gated[i] = 1;
+}
+
+int thunk_is_gated(uint32_t addr)
+{
+    uint32_t i = (addr - THUNK_BASE) / THUNK_STRIDE;
+    return i < THUNK_MAX && thunk_gated[i];
+}
+
 static uint64_t thunk_run(Ctx *c, uint32_t i)
 {
     const uint32_t target = THUNK_BASE + i * THUNK_STRIDE;
+    if (thunk_gated[i] && rt_thunk_gate)
+        rt_thunk_gate();
     if (log_calls_at >= 0.0)
         log_call(i);
 #ifdef COD_PROFILE
@@ -294,8 +312,45 @@ static const char *probe_str(uint32_t a)
     return (const char *)g_mem + a;
 }
 
+/* 1 while the render thread draws and the caller is another thread (render_async.c). */
+int render_async_foreign(void) __attribute__((weak));
+int render_async_busy(void) __attribute__((weak));
+
 void rt_probe(Ctx *c, uint32_t func)
 {
+    /* COD_PROBE_RACE: only probes reached by the game thread while the render thread
+     * draws (back-end code that must not run on both). */
+    static int race = -1;
+    if (race < 0)
+        race = getenv("COD_PROBE_RACE") != NULL;
+    /* VM_Call on the render thread (COD_PROBES=44F270): who, from its shadow stack. A
+     * module call there switches the current VM under the game thread's own calls. */
+    if (func == 0x0044F270u) {
+        static unsigned n_logged;
+        if (render_async_foreign && !render_async_foreign() && render_async_busy && render_async_busy() &&
+            n_logged < 20u) {
+            n_logged++;
+            char line[600];
+            size_t n = 0;
+#ifdef COD_PROFILE
+            uint32_t d = c->prof->depth;
+            for (uint32_t i = d > 24u ? d - 24u : 0u; i < d && i < RT_PROF_MAX; i++)
+                n += (size_t)snprintf(line + n, sizeof(line) - n, " %08X", c->prof->stack[i]);
+#endif
+            line[n] = 0;
+            rt_log("VM_Call(%08X, %u) on the render thread from %08X, stack%s", RD32(c->r[4] + 4u),
+                   RD32(c->r[4] + 8u), RD32(c->r[4]), line);
+        }
+        return;
+    }
+    if (race) {
+        static unsigned logged;
+        if (render_async_foreign && render_async_foreign() && logged < 200u) {
+            logged++;
+            rt_log("race: %08X on the game thread while the render thread draws, from %08X", func, RD32(c->r[4]));
+        }
+        return;
+    }
     /* COD_PROBE_STRS: the strings eax and edx point to (register arguments). */
     if (getenv("COD_PROBE_STRS"))
         rt_log("probe %08X: eax \"%.80s\" edx \"%.80s\"", func, probe_str(c->r[0]), probe_str(c->r[2]));

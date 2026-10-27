@@ -105,6 +105,11 @@ The game's command line goes in `ux0:data/cod1/args.txt` (default
 | `tools/qa_vita3k.sh` | Runs the Vita build in Vita3K with a scripted input and screenshots |
 | `tools/make_vita_livearea.py` | LiveArea pictures from the game's art |
 
+On the Vita the renderer's back end (the CPU side of every draw) runs on a second
+core while the next frame's game logic runs (`shim/src/render_async.c`;
+`COD_ASYNC_RENDER=0` turns it off), and the generated code keeps x87 values in
+single precision (`-DCOD_X87_FLOAT=OFF` for exact double precision).
+
 Diagnostics (environment variables; on the Vita, `ux0:data/cod1/env.txt`):
 `COD_INPUT` scripted input and screenshots, `COD_LOG_SYNC` unbuffered log,
 `COD_MSS_DEBUG` Miles calls, `COD_DRAW_STATS` per-frame draw totals, `COD_PEEK`

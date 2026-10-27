@@ -795,7 +795,10 @@ static void draw_stats_frame(void)
 
 /* Profiler phase of the ranged draw (COD_PROFILE builds; ids named in profile.c). */
 #ifdef COD_PROFILE
-#define DRAW_PHASE(id) (rt_prof_cur = (id))
+/* The drawing thread's profiler slot (the render thread's, or the game thread's;
+ * GL is never used by both at once). */
+static volatile uint32_t *draw_phase_slot;
+#define DRAW_PHASE(id) (*draw_phase_slot = (id))
 #else
 #define DRAW_PHASE(id) ((void)0)
 #endif
@@ -908,7 +911,8 @@ static void draw_range(Ctx *c)
     }
     int typed = type == GL_UNSIGNED_SHORT || type == GL_UNSIGNED_INT;
 #ifdef COD_PROFILE
-    const uint32_t prof_hprev = rt_prof_cur;
+    draw_phase_slot = &c->prof->cur;
+    const uint32_t prof_hprev = *draw_phase_slot;
 #endif
     DRAW_PHASE(PROF_H_PACK);
     if (count > 0 && end >= start && typed && end - start + 1u > (uint32_t)count * 8u + 64u &&
@@ -1089,8 +1093,11 @@ static uint32_t gl_missing(void) { return 0; }
 uint32_t opengl32_get_proc(const char *name)
 {
     for (unsigned i = 0; i < wgl_entry_count; i++)
-        if (strcmp(wgl_entries[i].name, name) == 0)
-            return thunk_register(wgl_entries[i].fn, wgl_entries[i].name);
+        if (strcmp(wgl_entries[i].name, name) == 0) {
+            uint32_t t = thunk_register(wgl_entries[i].fn, wgl_entries[i].name);
+            thunk_mark_gated(t);
+            return t;
+        }
     for (unsigned i = 0; i < g_gl_entry_count; i++) {
         const GlEntry *e = &g_gl_entries[i];
         if (strcmp(e->name, name) != 0)
@@ -1113,7 +1120,9 @@ uint32_t opengl32_get_proc(const char *name)
             }
             *e->host = p;
         }
-        return thunk_register(e->fn, e->name);
+        uint32_t t = thunk_register(e->fn, e->name);
+        thunk_mark_gated(t);   /* GL from the game thread waits for the render thread */
+        return t;
     }
     return 0;
 }

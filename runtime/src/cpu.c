@@ -368,6 +368,8 @@ void rt_dispatch(Ctx *c, uint32_t target)
     if (target >= THUNK_BASE && target < THUNK_BASE + THUNK_MAX * THUNK_STRIDE) {
         fn = thunk_lookup(target);
         if (fn) {
+            if (rt_thunk_gate && thunk_is_gated(target))
+                rt_thunk_gate();
 #ifdef COD_PROFILE
             uint32_t prof_prev = c->prof->cur;
             c->prof->cur = target;
