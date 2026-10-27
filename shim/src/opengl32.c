@@ -15,6 +15,10 @@
 #include <stdlib.h>
 #include <strings.h>
 
+#include <SDL.h>
+
+#include "pad_input.h"
+
 void user32_window_size(int *w, int *h);
 
 /* ---- entry points ------------------------------------------------------- */
@@ -522,6 +526,7 @@ static void rebase_indices(uint16_t *out, const uint8_t *in, uint32_t n, int in3
 
 /* COD_DRAW_STATS: per-frame totals of the ranged draws (logged every 100 frames). */
 static int draw_stats = -1;
+static uint64_t ds_up_n, ds_up_bytes, ds_evict;
 static uint64_t ds_draws, ds_range, ds_count, ds_bytes, ds_big, ds_vbo, ds_normal, ds_low, ds_idx_hunk;
 static uint32_t ds_frames;
 static uint32_t ds_ptrs[16];
@@ -548,24 +553,39 @@ typedef struct VboEntry {
     uint32_t changes;              /* content changes seen; past a few the array is dynamic */
     int dynamic;
     uint32_t last_use;
+    uint32_t bytes;                /* held in the buffer (and the shadow) */
+    int32_t next;                  /* hash chain (-1: end) */
 } VboEntry;
 
-#define VBO_SLOTS 64u
+/* A level draws from far more arrays than a few dozen (every model has its own),
+ * and an evicted array costs a full upload when drawn again: 64 slots made the
+ * first mission upload ~6 MB a frame. Entries are found through a hash of the
+ * pointer; past VBO_BUDGET bytes the least recently drawn array not drawn this
+ * frame is dropped. */
+#define VBO_SLOTS 1024u
+#define VBO_BUCKETS 2048u
+#define VBO_BUDGET (40u << 20)
 #define VBO_MAX_BYTES (16u << 20)  /* larger arrays are not cached */
 #define VBO_DYNAMIC_AFTER 4u
 static VboEntry vbo_cache[VBO_SLOTS];
+static int32_t vbo_bucket[VBO_BUCKETS];
+static uint32_t vbo_used_slots, vbo_total;
 static uint32_t vbo_frame;
 static int vbo_on = -1;
 
-static uint32_t vbo_bytes(const VboEntry *e) { return (e->hi - e->lo) * e->stride + e->esize; }
+static uint32_t vbo_hash(uint32_t ptr) { return (ptr * 2654435761u) >> (32u - 11u); }
 
 static int vbo_upload(VboEntry *e)
 {
-    uint32_t base = e->ptr + e->lo * e->stride, bytes = vbo_bytes(e);
+    uint32_t base = e->ptr + e->lo * e->stride, bytes = (e->hi - e->lo) * e->stride + e->esize;
     uint8_t *sh = realloc(e->shadow, bytes);
     if (!sh)
         return 0;
     e->shadow = sh;
+    vbo_total += bytes - e->bytes;
+    e->bytes = bytes;
+    ds_up_n++;
+    ds_up_bytes += bytes;
     memcpy(sh, gptr(base), bytes);
     glBindBuffer(GL_ARRAY_BUFFER, e->buf);
     glBufferData(GL_ARRAY_BUFFER, (GLsizei)bytes, sh, GL_STATIC_DRAW);
@@ -592,9 +612,82 @@ static int vbo_refresh(VboEntry *e, uint32_t start, uint32_t end)
         return 0;
     }
     memcpy(e->shadow + off, g, len);
+    ds_up_n++;
+    ds_up_bytes += len;
     glBindBuffer(GL_ARRAY_BUFFER, e->buf);
     glBufferSubData(GL_ARRAY_BUFFER, (GLintptr)off, (GLsizeiptr)len, e->shadow + off);
     return 1;
+}
+
+static void vbo_unlink(VboEntry *e)
+{
+    int32_t *link = &vbo_bucket[vbo_hash(e->ptr)];
+    int32_t idx = (int32_t)(e - vbo_cache);
+    while (*link >= 0 && *link != idx)
+        link = &vbo_cache[*link].next;
+    if (*link == idx)
+        *link = e->next;
+}
+
+/* The least recently drawn entry not drawn this frame (NULL: none). */
+static VboEntry *vbo_lru(void)
+{
+    VboEntry *v = NULL;
+    for (uint32_t i = 0; i < vbo_used_slots; i++) {
+        VboEntry *x = &vbo_cache[i];
+        if (x->ptr && x->last_use != vbo_frame && (!v || x->last_use < v->last_use))
+            v = x;
+    }
+    return v;
+}
+
+static void vbo_drop(VboEntry *e)
+{
+    ds_evict++;
+    vbo_unlink(e);
+    vbo_total -= e->bytes;
+    e->bytes = 0;
+    free(e->shadow);
+    e->shadow = NULL;
+    e->ptr = 0;
+    if (e->buf) {   /* its memory back (vitaGL frees it once the GPU is done with it) */
+        glDeleteBuffers(1, &e->buf);
+        e->buf = 0;
+    }
+}
+
+/* Room for `bytes` more under the budget, dropping old entries. */
+static void vbo_make_room(uint32_t bytes)
+{
+    while (vbo_total + bytes > VBO_BUDGET) {
+        VboEntry *v = vbo_lru();
+        if (!v)
+            break;
+        vbo_drop(v);
+    }
+}
+
+/* Vertices to hold when an array's held range lo..hi must take start..end: the
+ * union, widened by half of it on the side(s) that grew, so a camera turning
+ * over a large array uploads it a few times instead of at every new piece. */
+static void vbo_grow(uint32_t *lo, uint32_t *hi, uint32_t start, uint32_t end, uint32_t st, uint32_t es)
+{
+    uint32_t nlo = start < *lo ? start : *lo, nhi = end > *hi ? end : *hi;
+    uint32_t slack = (nhi - nlo) / 2u + 64u;
+    if (start < *lo)
+        nlo = nlo > slack ? nlo - slack : 0u;
+    if (end > *hi)
+        nhi += slack;
+    while (nhi > nlo && (nhi - nlo) * st + es > VBO_MAX_BYTES) {   /* keep the drawn part */
+        if (nlo < start)
+            nlo++;
+        else if (nhi > end)
+            nhi--;
+        else
+            break;
+    }
+    *lo = nlo;
+    *hi = nhi;
 }
 
 /* Buffer holding the array's vertices start..end (one buffer per array: the
@@ -605,44 +698,71 @@ static GLuint vbo_block(uint32_t ptr, uint32_t st, uint32_t es, uint32_t start, 
 {
     if (!ptr || ptr < GUEST_HEAP_BASE || st < 4u || es < 4u)
         return 0;
-    VboEntry *e = NULL, *victim = NULL;
-    for (uint32_t i = 0; i < VBO_SLOTS; i++) {
+    if (!vbo_used_slots)
+        memset(vbo_bucket, 0xFF, sizeof(vbo_bucket));
+    VboEntry *e = NULL;
+    for (int32_t i = vbo_bucket[vbo_hash(ptr)]; i >= 0; i = vbo_cache[i].next) {
         VboEntry *x = &vbo_cache[i];
-        if (x->buf && x->ptr == ptr && x->stride == st && x->esize == es) {
+        if (x->ptr == ptr && x->stride == st && x->esize == es) {
             e = x;
             break;
         }
-        if (!victim || !x->buf || (victim->buf && x->last_use < victim->last_use))
-            victim = x;
     }
-    if (e && e->dynamic)
+    if (e && e->dynamic) {
+        e->last_use = vbo_frame;
+        return 0;
+    }
+    if ((end - start) * st + es > VBO_MAX_BYTES)
         return 0;
     if (!e) {
-        if ((end - start) * st + es > VBO_MAX_BYTES)
+        uint32_t lo = start, hi = end;
+        vbo_grow(&lo, &hi, start, end, st, es);
+        uint32_t bytes = (hi - lo) * st + es;
+        vbo_make_room(bytes);
+        if (vbo_total + bytes > VBO_BUDGET)
             return 0;
-        e = victim;
+        /* a free slot: never used, or dropped */
+        for (uint32_t i = 0; i < vbo_used_slots && !e; i++)
+            if (!vbo_cache[i].ptr)
+                e = &vbo_cache[i];
+        if (!e && vbo_used_slots < VBO_SLOTS)
+            e = &vbo_cache[vbo_used_slots++];
+        if (!e) {
+            e = vbo_lru();
+            if (!e)
+                return 0;
+            vbo_drop(e);
+        }
         if (!e->buf)
             glGenBuffers(1, &e->buf);
         e->ptr = ptr;
         e->stride = st;
         e->esize = es;
-        e->lo = start;
-        e->hi = end;
+        e->lo = lo;
+        e->hi = hi;
         e->changes = 0;
         e->dynamic = 0;
+        e->bytes = 0;
+        uint32_t h = vbo_hash(ptr);
+        e->next = vbo_bucket[h];
+        vbo_bucket[h] = (int32_t)(e - vbo_cache);
         if (!vbo_upload(e)) {
-            e->ptr = 0;
+            vbo_drop(e);
             return 0;
         }
     } else if (start < e->lo || end > e->hi) {
-        uint32_t lo = start < e->lo ? start : e->lo, hi = end > e->hi ? end : e->hi;
-        if ((hi - lo) * st + es > VBO_MAX_BYTES)
-            return 0;
+        uint32_t lo = e->lo, hi = e->hi;
+        vbo_grow(&lo, &hi, start, end, st, es);
+        e->last_use = vbo_frame;   /* not a victim of its own growth */
+        vbo_make_room((hi - lo) * st + es - e->bytes);
         e->lo = lo;
         e->hi = hi;
-        if (!vbo_upload(e))
+        if (!vbo_upload(e)) {
+            vbo_drop(e);
             return 0;
+        }
     } else if (!vbo_refresh(e, start, end)) {
+        e->last_use = vbo_frame;
         return 0;
     }
     e->last_use = vbo_frame;
@@ -659,10 +779,12 @@ static void draw_stats_frame(void)
                "index arrays in the hunk %.0f, draws with range > 4x indices %.0f, from buffer objects %.0f (not: normals %.0f, image arrays %.0f); vertex arrays at:",
                ds_draws / 100.0, ds_range / 100.0, ds_count / 100.0, ds_bytes / 102400.0, ds_idx_hunk / 100.0, ds_big / 100.0, ds_vbo / 100.0,
                ds_normal / 100.0, ds_low / 100.0);
-        for (unsigned i = 0; i < ds_nptrs; i++)
-            rt_log("  %08X", ds_ptrs[i]);
-        for (unsigned i = 0; i < VBO_SLOTS; i++)
-            if (vbo_cache[i].buf)
+        rt_log("buffer uploads/frame %.1f (%.0f KB), cache evictions/frame %.1f", ds_up_n / 100.0,
+               ds_up_bytes / 102400.0, ds_evict / 100.0);
+        ds_up_n = ds_up_bytes = ds_evict = 0;
+        rt_log("buffer cache: %u entries, %u KB", vbo_used_slots, vbo_total / 1024u);
+        for (unsigned i = 0; i < vbo_used_slots && draw_stats > 1; i++)
+            if (vbo_cache[i].ptr)
                 rt_log("  vbo %08X stride %u elem %u verts %u..%u changes %u%s", vbo_cache[i].ptr, vbo_cache[i].stride,
                        vbo_cache[i].esize, vbo_cache[i].lo, vbo_cache[i].hi, vbo_cache[i].changes,
                        vbo_cache[i].dynamic ? " dynamic" : "");
@@ -670,6 +792,13 @@ static void draw_stats_frame(void)
         ds_nptrs = 0;
     }
 }
+
+/* Profiler phase of the ranged draw (COD_PROFILE builds; ids named in profile.c). */
+#ifdef COD_PROFILE
+#define DRAW_PHASE(id) (rt_prof_cur = (id))
+#else
+#define DRAW_PHASE(id) ((void)0)
+#endif
 
 /* Draws start..end with every hunk array from a buffer object; 0 if some array
  * cannot be (then the caller draws from client memory). */
@@ -710,9 +839,11 @@ static int draw_from_vbos(GLenum mode, uint32_t start, uint32_t end, GLsizei cou
     if (hi - lo > st)
         return 0;
     uint32_t boff;
+    DRAW_PHASE(PROF_H_BK_BUF);
     GLuint buf = vbo_block(lo, st, hi - lo, start, end, &boff);
     if (!buf)
         return 0;
+    DRAW_PHASE(PROF_H_BK_PTRS);
     int in_block[3 + MAX_TEXUNITS];
     for (unsigned k = 0; k < 3 + MAX_TEXUNITS; k++) {
         ClientArray *x = all[k];
@@ -743,7 +874,9 @@ static int draw_from_vbos(GLenum mode, uint32_t start, uint32_t end, GLsizei cou
     }
     glClientActiveTexture(GL_TEXTURE0 + va_client_unit);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
+    DRAW_PHASE(PROF_H_GLDRAW);
     glDrawRangeElements(mode, 0, end - start, count, GL_UNSIGNED_SHORT, idx16);
+    DRAW_PHASE(PROF_H_BK_PTRS);
     shift_arrays(0);   /* the game's client pointers back (no buffer bound) */
     return 1;
 }
@@ -755,7 +888,7 @@ static void draw_range(Ctx *c)
     GLsizei count = (GLsizei)ARG(3);
     uint32_t idx = ARG(5);
     if (draw_stats < 0)
-        draw_stats = getenv("COD_DRAW_STATS") != NULL;
+        draw_stats = getenv("COD_DRAW_STATS") ? atoi(getenv("COD_DRAW_STATS")) : 0;   /* 2: and the cache entries */
     if (draw_stats > 0 && end >= start) {
         uint32_t r = end - start + 1u;
         ds_draws++;
@@ -774,13 +907,20 @@ static void draw_range(Ctx *c)
             ds_ptrs[ds_nptrs++] = va_vertex.ptr;
     }
     int typed = type == GL_UNSIGNED_SHORT || type == GL_UNSIGNED_INT;
+#ifdef COD_PROFILE
+    const uint32_t prof_hprev = rt_prof_cur;
+#endif
+    DRAW_PHASE(PROF_H_PACK);
     if (count > 0 && end >= start && typed && end - start + 1u > (uint32_t)count * 8u + 64u &&
         draw_compacted(mode, start, end, count, type, idx)) {
+        DRAW_PHASE(prof_hprev);
         stdcall_ret(c, c->r[0], 6);
         return;
     }
     if (count <= 0 || end < start || !typed) {
+        DRAW_PHASE(PROF_H_GLDRAW);
         glDrawRangeElements(mode, start, end, count, type, gptr(idx));
+        DRAW_PHASE(prof_hprev);
         stdcall_ret(c, c->r[0], 6);
         return;
     }
@@ -792,15 +932,21 @@ static void draw_range(Ctx *c)
     }
     int fits16 = end - start < 65536u;
     if (fits16 && tmp16) {
+        DRAW_PHASE(PROF_H_INDEX);
         rebase_indices(tmp16, g_mem + idx, (uint32_t)count, type == GL_UNSIGNED_INT, start);
         if (!draw_from_vbos(mode, start, end, count, tmp16)) {
+            DRAW_PHASE(PROF_H_BK_PTRS);
             shift_arrays(start);
+            DRAW_PHASE(PROF_H_GLDRAW);
             glDrawRangeElements(mode, 0, end - start, count, GL_UNSIGNED_SHORT, tmp16);
+            DRAW_PHASE(PROF_H_BK_PTRS);
             shift_arrays(0);
         }
     } else {
+        DRAW_PHASE(PROF_H_GLDRAW);
         glDrawRangeElements(mode, start, end, count, type, gptr(idx));
     }
+    DRAW_PHASE(prof_hprev);
     stdcall_ret(c, c->r[0], 6);
 }
 
@@ -1065,8 +1211,60 @@ void gl_trace_call(Ctx *c, const char *name)
 
 static void draw_stats_frame(void);
 
+/* Frame times while playing, logged every 10 seconds: the average, the slowest
+ * frame and how many frames missed 30 fps or hitched. With the profiler,
+ * COD_PROF_FRAMES picks the frames whose samples count: "play" (the default:
+ * gameplay frames), "slow" (gameplay frames over 50 ms: the hitches) or "all". */
+static void frame_times(void)
+{
+    static uint64_t last, window, freq, play_us;
+    static uint32_t frames, over33, over50, over100, worst;
+    static int prof_mode = -1;
+    uint64_t now = SDL_GetPerformanceCounter();
+    if (!freq) {
+        freq = SDL_GetPerformanceFrequency();
+        last = window = now;
+#ifdef COD_PROFILE
+        const char *m = getenv("COD_PROF_FRAMES");
+        prof_mode = !m || !strcmp(m, "play") ? 1 : !strcmp(m, "slow") ? 2 : 0;
+        if (prof_mode)
+            rt_prof_reset(1);
+#endif
+        return;
+    }
+    uint32_t us = (uint32_t)((now - last) * 1000000u / freq);
+    last = now;
+    /* Played: no menu or console (keyCatchers 0, also true during videos), cls.state
+     * active (2; 3 is a full-screen video) and not a loading screen's long frame. */
+    int play = pad_in_gameplay() && RD32(0x01439260u) == 2u && us < 1000000u;
+#ifdef COD_PROFILE
+    if (prof_mode > 0)
+        rt_prof_frame_end(play && (prof_mode == 1 || us > 50000u));
+#endif
+    (void)prof_mode;
+    if (play) {
+        frames++;
+        play_us += us;
+        over33 += us > 34000u;
+        over50 += us > 50000u;
+        over100 += us > 100000u;
+        if (us > worst)
+            worst = us;
+    }
+    uint64_t span = (now - window) * 1000u / freq;
+    if (span >= 10000u) {
+        if (frames)
+            rt_log("frames: %u in play, %.1f fps, slowest %.0f ms, over 33 ms %u, over 50 ms %u, over 100 ms %u",
+                   frames, frames * 1e6 / (double)play_us, worst / 1000.0, over33, over50, over100);
+        window = now;
+        frames = over33 = over50 = over100 = worst = 0;
+        play_us = 0;
+    }
+}
+
 static void present(void)
 {
+    frame_times();
     draw_stats_frame();
     vbo_frame++;
     if (g_gl_tracing) {

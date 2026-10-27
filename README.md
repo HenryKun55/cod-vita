@@ -78,7 +78,7 @@ The LiveArea pictures are made from the game's own art at configure time, so the
 are not part of this repository either.
 
 The game's command line goes in `ux0:data/cod1/args.txt` (default
-`+set com_hunkMegs 96`). Controls:
+`+set com_hunkMegs 96 +set r_flares 0`). Controls:
 
 | Vita | Game |
 | --- | --- |

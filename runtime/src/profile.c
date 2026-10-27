@@ -54,7 +54,7 @@ typedef struct Map {
 } Map;
 
 static Map excl, incl, pairs, edges, render_excl;
-static uint32_t total;
+static uint32_t total, taken;
 static volatile int reset_requested, stopped;
 
 /* Per-frame mode: the game thread writes the frame's verdict to keep_frame[], then
@@ -170,13 +170,13 @@ static const char *name_of(uint32_t id, char *buf, size_t n)
             snprintf(buf, n, "%s!%s", g_guest_imports[i].dll, g_guest_imports[i].name);
             return buf;
         }
-    static const char *const host[] = { "?", "decode", "near clip", "pack", "batch", "gl state", "gl draw",
-                                        "texture", "blit", "audio mix", "index scan", "fill (render target)",
+    static const char *const host[] = { "?", "decode", "near clip", "pack (compacted draw gather)", "batch", "gl state", "gl draw (vitaGL draw call)",
+                                        "texture", "blit", "audio mix", "index rebase", "fill (render target)",
                                         "fill (memory surface)", "blit (memory surface)",
                                         "render thread idle (waiting for the game thread)",
                                         "render thread swap (vsync, GPU)", "render thread other commands",
-                                        "draw: buffer objects", "draw: render states", "draw: texture stages",
-                                        "draw: transforms", "draw: vertex pointers", "draw: gl draw call" };
+                                        "draw: buffer objects (cache lookup/refresh)", "draw: render states", "draw: texture stages",
+                                        "draw: transforms", "draw: vertex pointers (gl*Pointer)", "draw: gl draw call" };
     if ((id & 0xFFFFFF00u) == 0xFD000000u && (id & 0xFFu) < sizeof(host) / sizeof(host[0])) {
         snprintf(buf, n, "host %s", host[id & 0xFFu]);
         return buf;
@@ -298,7 +298,9 @@ static void sampler_loop(void)
             reset_requested = 0;
         }
         sample();
-        if (total % DUMP_EVERY == 0)
+        /* Every DUMP_EVERY samples taken (counted or not: per-frame mode adds a
+         * frame's samples at once, and may keep none for a while). */
+        if (++taken % DUMP_EVERY == 0)
             dump();
     }
 }

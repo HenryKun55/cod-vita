@@ -1211,7 +1211,9 @@ void kernel32_init(void)
         t0_us = now_us();
     /* Extra command line (e.g. "+set r_mode 4 +map training"): COD_ARGS, or on the
      * Vita the first line of ux0:data/cod1/args.txt. The Vita's default lowers the
-     * hunk (128 MiB on the PC; the guest space is 192 MiB). */
+     * hunk (128 MiB on the PC; the guest space is 192 MiB) and turns the light
+     * flares off (their occlusion test reads the depth buffer back, which waits for
+     * the GPU every frame). */
     const char *args = getenv("COD_ARGS");
 #if defined(__vita__)
     static char file_args[512];
@@ -1222,7 +1224,7 @@ void kernel32_init(void)
         fclose(af);
         args = file_args;
     } else {
-        args = "+set com_hunkMegs 96";
+        args = "+set com_hunkMegs 96 +set r_flares 0";
     }
 #endif
     char line[1024];
